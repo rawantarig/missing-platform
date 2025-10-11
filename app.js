@@ -13,8 +13,7 @@ const app = firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
 
-// تهيئة EmailJS
-emailjs.init("YOUR_PUBLIC_KEY"); // استبدل بمفتاحك من EmailJS
+
 
 // بيانات التطبيق
 const appData = {
@@ -1354,6 +1353,132 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 });
+// ==================== دوال التسجيل المفقودة ====================
+async function registerPolice() {
+    const name = document.getElementById('police-name').value;
+    const number = document.getElementById('police-number').value;
+    const email = document.getElementById('police-email').value;
+    const password = document.getElementById('police-password').value;
+    
+    if (name && number && email && password) {
+        try {
+            const newUser = {
+                name: name,
+                policeNumber: number,
+                email: email,
+                password: password,
+                role: 'police',
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            };
+            
+            await db.collection('users').add(newUser);
+            showAlert("تم إنشاء حساب الشرطة بنجاح!", "success");
+            showLogin('police');
+        } catch (error) {
+            console.error("Error registering police: ", error);
+            showAlert("حدث خطأ أثناء إنشاء الحساب", "error");
+        }
+    } else {
+        showAlert("يرجى ملء جميع الحقول", "warning");
+    }
+}
+
+async function loginPolice() {
+    const email = document.getElementById('police-login-email').value;
+    const password = document.getElementById('police-login-password').value;
+    
+    try {
+        const snapshot = await db.collection('users')
+            .where('email', '==', email)
+            .where('password', '==', password)
+            .where('role', '==', 'police')
+            .get();
+        
+        if (!snapshot.empty) {
+            const userDoc = snapshot.docs[0];
+            const userData = userDoc.data();
+            
+            appData.currentUser = {
+                id: userDoc.id,
+                ...userData
+            };
+            
+            localStorage.setItem('currentUser', JSON.stringify(appData.currentUser));
+            await showPoliceDashboard();
+        } else {
+            showAlert("البريد الإلكتروني أو كلمة المرور غير صحيحة", "error");
+        }
+    } catch (error) {
+        console.error("Error logging in police: ", error);
+        showAlert("حدث خطأ أثناء تسجيل الدخول", "error");
+    }
+}
+
+async function registerVolunteer() {
+    const name = document.getElementById('volunteer-name').value;
+    const email = document.getElementById('volunteer-email').value;
+    const phone = document.getElementById('volunteer-phone').value;
+    const password = document.getElementById('volunteer-password').value;
+    
+    if (name && email && phone && password) {
+        try {
+            const newUser = {
+                name: name,
+                email: email,
+                phone: phone,
+                password: password,
+                role: 'volunteer',
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            };
+            
+            await db.collection('users').add(newUser);
+            showAlert("تم إنشاء حساب المتطوع بنجاح!", "success");
+            showLogin('volunteer');
+        } catch (error) {
+            console.error("Error registering volunteer: ", error);
+            showAlert("حدث خطأ أثناء إنشاء الحساب", "error");
+        }
+    } else {
+        showAlert("يرجى ملء جميع الحقول", "warning");
+    }
+}
+
+async function loginVolunteer() {
+    const email = document.getElementById('volunteer-login-email').value;
+    const password = document.getElementById('volunteer-login-password').value;
+    
+    try {
+        const snapshot = await db.collection('users')
+            .where('email', '==', email)
+            .where('password', '==', password)
+            .where('role', '==', 'volunteer')
+            .get();
+        
+        if (!snapshot.empty) {
+            const userDoc = snapshot.docs[0];
+            const userData = userDoc.data();
+            
+            appData.currentUser = {
+                id: userDoc.id,
+                ...userData
+            };
+            
+            localStorage.setItem('currentUser', JSON.stringify(appData.currentUser));
+            await showVolunteerDashboard();
+        } else {
+            showAlert("البريد الإلكتروني أو كلمة المرور غير صحيحة", "error");
+        }
+    } catch (error) {
+        console.error("Error logging in volunteer: ", error);
+        showAlert("حدث خطأ أثناء تسجيل الدخول", "error");
+    }
+}
+
+// دالة submitVolunteerReport المفقودة
+async function submitVolunteerReport() {
+    await addVolunteerReport(); // استدعاء الدالة الموجودة
+}
+
 
 // جعل جميع الدوال متاحة globally
 window.registerUser = registerUser;

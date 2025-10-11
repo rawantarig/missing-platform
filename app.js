@@ -13,7 +13,8 @@ const app = firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
 
-
+// تهيئة EmailJS
+emailjs.init("YOUR_PUBLIC_KEY"); // استبدل بمفتاحك من EmailJS
 
 // بيانات التطبيق
 const appData = {
@@ -22,6 +23,36 @@ const appData = {
     editingReportId: null,
     allReports: []
 };
+
+// ==================== مستمع حالة المصادقة ====================
+firebase.auth().onAuthStateChanged((user) => {
+    if (user) {
+        // المستخدم مسجل دخول - جلب بياناته من Firestore
+        db.collection('users').doc(user.uid).get().then((doc) => {
+            if (doc.exists) {
+                const userData = doc.data();
+                appData.currentUser = {
+                    id: user.uid,
+                    ...userData
+                };
+                localStorage.setItem('currentUser', JSON.stringify(appData.currentUser));
+                
+                // توجيه المستخدم حسب الصلاحية
+                if (userData.role === 'user') {
+                    showUserDashboard();
+                } else if (userData.role === 'police') {
+                    showPoliceDashboard();
+                } else if (userData.role === 'volunteer') {
+                    showVolunteerDashboard();
+                }
+            }
+        });
+    } else {
+        // المستخدم غير مسجل دخول
+        appData.currentUser = null;
+        localStorage.removeItem('currentUser');
+    }
+});
 
 // ==================== دوال المساعدة ====================
 function showAlert(message, type = 'info') {
@@ -111,7 +142,7 @@ function sendAlternativeNotification(email, report) {
     showAlert('💾 تم حفظ الإشعار في النظام البديل', 'info');
 }
 
-// ==================== دوال المستخدمين ====================
+// ==================== دوال المستخدمين المعدلة ====================
 async function registerUser() {
     const name = document.getElementById('user-name').value;
     const email = document.getElementById('user-email').value;
@@ -120,28 +151,33 @@ async function registerUser() {
     
     if (name && email && phone && password) {
         try {
-            // التحقق من عدم وجود مستخدم بنفس البريد
-            const snapshot = await db.collection('users').where('email', '==', email).get();
-            if (!snapshot.empty) {
-                showAlert('هذا البريد الإلكتروني مسجل بالفعل', 'error');
-                return;
-            }
-
-            const newUser = {
+            // ✅ استخدام Firebase Authentication لإنشاء المستخدم
+            const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
+            const user = userCredential.user;
+            
+            // ✅ حفظ بيانات المستخدم في Firestore (بدون كلمة المرور)
+            await db.collection('users').doc(user.uid).set({
                 name: name,
                 email: email,
                 phone: phone,
-                password: password,
                 role: 'user',
                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
-            };
+            });
             
-            await db.collection('users').add(newUser);
             showAlert("تم إنشاء الحساب بنجاح!", "success");
             showLogin('user');
+            
         } catch (error) {
             console.error("Error registering user: ", error);
-            showAlert("حدث خطأ أثناء إنشاء الحساب", "error");
+            let errorMessage = "حدث خطأ أثناء إنشاء الحساب";
+            
+            if (error.code === 'auth/email-already-in-use') {
+                errorMessage = "هذا البريد الإلكتروني مسجل بالفعل";
+            } else if (error.code === 'auth/weak-password') {
+                errorMessage = "كلمة المرور ضعيفة، يجب أن تكون 6 أحرف على الأقل";
+            }
+            
+            showAlert(errorMessage, "error");
         }
     } else {
         showAlert("يرجى ملء جميع الحقول", "warning");
@@ -153,17 +189,18 @@ async function loginUser() {
     const password = document.getElementById('user-login-password').value;
     
     try {
-        const snapshot = await db.collection('users')
-            .where('email', '==', email)
-            .where('password', '==', password)
-            .get();
+        // ✅ استخدام Firebase Authentication لتسجيل الدخول
+        const userCredential = await firebase.auth().signInWithEmailAndPassword(email, password);
+        const user = userCredential.user;
         
-        if (!snapshot.empty) {
-            const userDoc = snapshot.docs[0];
+        // ✅ جلب بيانات المستخدم من Firestore
+        const userDoc = await db.collection('users').doc(user.uid).get();
+        
+        if (userDoc.exists) {
             const userData = userDoc.data();
             
             appData.currentUser = {
-                id: userDoc.id,
+                id: user.uid, // ✅ استخدام UID من Authentication
                 ...userData
             };
             
@@ -178,11 +215,35 @@ async function loginUser() {
                 await showVolunteerDashboard();
             }
         } else {
-            showAlert("البريد الإلكتروني أو كلمة المرور غير صحيحة", "error");
+            showAlert("بيانات المستخدم غير موجودة", "error");
         }
+        
     } catch (error) {
         console.error("Error logging in: ", error);
-        showAlert("حدث خطأ أثناء تسجيل الدخول", "error");
+        let errorMessage = "البريد الإلكتروني أو كلمة المرور غير صحيحة";
+        
+        if (error.code === 'auth/user-not-found') {
+            errorMessage = "المستخدم غير موجود";
+        } else if (error.code === 'auth/wrong-password') {
+            errorMessage = "كلمة المرور غير صحيحة";
+        } else if (error.code === 'auth/invalid-email') {
+            errorMessage = "البريد الإلكتروني غير صالح";
+        }
+        
+        showAlert(errorMessage, "error");
+    }
+}
+
+// ==================== إضافة دالة الخروج ====================
+async function logoutUser() {
+    try {
+        await firebase.auth().signOut();
+        appData.currentUser = null;
+        localStorage.removeItem('currentUser');
+        showMainPage();
+        showAlert("تم تسجيل الخروج بنجاح", "success");
+    } catch (error) {
+        console.error("Error signing out: ", error);
     }
 }
 
@@ -204,6 +265,7 @@ async function showUserDashboard() {
     await updateUserBadges();
 }
 
+// ==================== دوال البلاغات المعدلة ====================
 async function addUserReport() {
     const missingName = document.getElementById('missing-name').value;
     const missingAge = document.getElementById('missing-age').value;
@@ -226,7 +288,7 @@ async function addUserReport() {
             }
             
             const newReport = {
-                userId: appData.currentUser.email,
+                userId: appData.currentUser.id, // ✅ استخدام ID من Authentication
                 reporterName: appData.currentUser.name,
                 reporterPhone: reporterPhone,
                 additionalContact: additionalContact,
@@ -249,7 +311,7 @@ async function addUserReport() {
             
             // إرسال إشعار للمستخدم
             await db.collection('notifications').add({
-                userId: appData.currentUser.email,
+                userId: appData.currentUser.id, // ✅ استخدام ID من Authentication
                 message: `تم إرسال بلاغك بنجاح عن: ${missingName}`,
                 type: 'success',
                 read: false,
@@ -286,7 +348,7 @@ async function loadUserReports() {
     
     try {
         const snapshot = await db.collection('reports')
-            .where('userId', '==', appData.currentUser.email)
+            .where('userId', '==', appData.currentUser.id) // ✅ استخدام ID من Authentication
             .orderBy('createdAt', 'desc')
             .get();
         
@@ -415,7 +477,7 @@ async function loadPoliceReportsForUser() {
     try {
         // الحصول على تقارير الشرطة المرتبطة ببلاغات المستخدم
         const userReportsSnapshot = await db.collection('reports')
-            .where('userId', '==', appData.currentUser.email)
+            .where('userId', '==', appData.currentUser.id) // ✅ استخدام ID من Authentication
             .get();
         
         if (userReportsSnapshot.empty) {
@@ -462,7 +524,7 @@ async function loadPoliceReportsForUser() {
     }
 }
 
-// ==================== دوال الإشعارات ====================
+// ==================== دوال الإشعارات المعدلة ====================
 async function loadUserNotifications() {
     const notificationsList = document.getElementById('user-notifications-list');
     if (!notificationsList) return;
@@ -471,7 +533,7 @@ async function loadUserNotifications() {
     
     try {
         const snapshot = await db.collection('notifications')
-            .where('userId', '==', appData.currentUser.email)
+            .where('userId', '==', appData.currentUser.id) // ✅ استخدام ID من Authentication
             .where('read', '==', false)
             .orderBy('createdAt', 'desc')
             .get();
@@ -519,7 +581,7 @@ async function updateUserBadges() {
     try {
         // تحديث شارة الإشعارات
         const notificationsSnapshot = await db.collection('notifications')
-            .where('userId', '==', appData.currentUser.email)
+            .where('userId', '==', appData.currentUser.id) // ✅ استخدام ID من Authentication
             .where('read', '==', false)
             .get();
         
@@ -535,7 +597,7 @@ async function updateUserBadges() {
         
         // تحديث شارة البلاغات
         const reportsSnapshot = await db.collection('reports')
-            .where('userId', '==', appData.currentUser.email)
+            .where('userId', '==', appData.currentUser.id) // ✅ استخدام ID من Authentication
             .get();
         
         const reportsBadge = document.getElementById('my-reports-badge');
@@ -905,7 +967,7 @@ async function addVolunteerReport() {
             
             // إرسال إشعار للمتطوع
             await db.collection('notifications').add({
-                userId: appData.currentUser.email,
+                userId: appData.currentUser.id, // ✅ استخدام ID من Authentication
                 message: `تم إرسال تقريرك بنجاح عن الحالة: ${reportDoc.data().missingName}`,
                 type: 'success',
                 read: false,
@@ -1152,7 +1214,7 @@ async function loadVolunteerNotifications() {
     
     try {
         const snapshot = await db.collection('notifications')
-            .where('userId', '==', appData.currentUser.email)
+            .where('userId', '==', appData.currentUser.id) // ✅ استخدام ID من Authentication
             .where('read', '==', false)
             .orderBy('createdAt', 'desc')
             .get();
@@ -1200,7 +1262,7 @@ async function updateVolunteerBadges() {
     try {
         // شارة الإشعارات
         const notificationsSnapshot = await db.collection('notifications')
-            .where('userId', '==', appData.currentUser.email)
+            .where('userId', '==', appData.currentUser.id) // ✅ استخدام ID من Authentication
             .where('read', '==', false)
             .get();
         
@@ -1340,149 +1402,17 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // التحقق من وجود مستخدم مسجل دخول
-    const savedUser = localStorage.getItem('currentUser');
-    if (savedUser) {
-        appData.currentUser = JSON.parse(savedUser);
-        if (appData.currentUser.role === 'user') {
-            showUserDashboard();
-        } else if (appData.currentUser.role === 'police') {
-            showPoliceDashboard();
-        } else if (appData.currentUser.role === 'volunteer') {
-            showVolunteerDashboard();
-        }
-    }
+    // إضافة أزرار الخروج
+    const logoutButtons = document.querySelectorAll('.logout-btn');
+    logoutButtons.forEach(button => {
+        button.addEventListener('click', logoutUser);
+    });
 });
-// ==================== دوال التسجيل المفقودة ====================
-async function registerPolice() {
-    const name = document.getElementById('police-name').value;
-    const number = document.getElementById('police-number').value;
-    const email = document.getElementById('police-email').value;
-    const password = document.getElementById('police-password').value;
-    
-    if (name && number && email && password) {
-        try {
-            const newUser = {
-                name: name,
-                policeNumber: number,
-                email: email,
-                password: password,
-                role: 'police',
-                createdAt: firebase.firestore.FieldValue.serverTimestamp()
-            };
-            
-            await db.collection('users').add(newUser);
-            showAlert("تم إنشاء حساب الشرطة بنجاح!", "success");
-            showLogin('police');
-        } catch (error) {
-            console.error("Error registering police: ", error);
-            showAlert("حدث خطأ أثناء إنشاء الحساب", "error");
-        }
-    } else {
-        showAlert("يرجى ملء جميع الحقول", "warning");
-    }
-}
-
-async function loginPolice() {
-    const email = document.getElementById('police-login-email').value;
-    const password = document.getElementById('police-login-password').value;
-    
-    try {
-        const snapshot = await db.collection('users')
-            .where('email', '==', email)
-            .where('password', '==', password)
-            .where('role', '==', 'police')
-            .get();
-        
-        if (!snapshot.empty) {
-            const userDoc = snapshot.docs[0];
-            const userData = userDoc.data();
-            
-            appData.currentUser = {
-                id: userDoc.id,
-                ...userData
-            };
-            
-            localStorage.setItem('currentUser', JSON.stringify(appData.currentUser));
-            await showPoliceDashboard();
-        } else {
-            showAlert("البريد الإلكتروني أو كلمة المرور غير صحيحة", "error");
-        }
-    } catch (error) {
-        console.error("Error logging in police: ", error);
-        showAlert("حدث خطأ أثناء تسجيل الدخول", "error");
-    }
-}
-
-async function registerVolunteer() {
-    const name = document.getElementById('volunteer-name').value;
-    const email = document.getElementById('volunteer-email').value;
-    const phone = document.getElementById('volunteer-phone').value;
-    const password = document.getElementById('volunteer-password').value;
-    
-    if (name && email && phone && password) {
-        try {
-            const newUser = {
-                name: name,
-                email: email,
-                phone: phone,
-                password: password,
-                role: 'volunteer',
-                createdAt: firebase.firestore.FieldValue.serverTimestamp()
-            };
-            
-            await db.collection('users').add(newUser);
-            showAlert("تم إنشاء حساب المتطوع بنجاح!", "success");
-            showLogin('volunteer');
-        } catch (error) {
-            console.error("Error registering volunteer: ", error);
-            showAlert("حدث خطأ أثناء إنشاء الحساب", "error");
-        }
-    } else {
-        showAlert("يرجى ملء جميع الحقول", "warning");
-    }
-}
-
-async function loginVolunteer() {
-    const email = document.getElementById('volunteer-login-email').value;
-    const password = document.getElementById('volunteer-login-password').value;
-    
-    try {
-        const snapshot = await db.collection('users')
-            .where('email', '==', email)
-            .where('password', '==', password)
-            .where('role', '==', 'volunteer')
-            .get();
-        
-        if (!snapshot.empty) {
-            const userDoc = snapshot.docs[0];
-            const userData = userDoc.data();
-            
-            appData.currentUser = {
-                id: userDoc.id,
-                ...userData
-            };
-            
-            localStorage.setItem('currentUser', JSON.stringify(appData.currentUser));
-            await showVolunteerDashboard();
-        } else {
-            showAlert("البريد الإلكتروني أو كلمة المرور غير صحيحة", "error");
-        }
-    } catch (error) {
-        console.error("Error logging in volunteer: ", error);
-        showAlert("حدث خطأ أثناء تسجيل الدخول", "error");
-    }
-}
-
-// دالة submitVolunteerReport المفقودة
-async function submitVolunteerReport() {
-    await addVolunteerReport(); // استدعاء الدالة الموجودة
-}
-
 
 // جعل جميع الدوال متاحة globally
 window.registerUser = registerUser;
 window.loginUser = loginUser;
+window.logoutUser = logoutUser;
 window.addUserReport = addUserReport;
 window.showPlatform = showPlatform;
 window.showRegister = showRegister;

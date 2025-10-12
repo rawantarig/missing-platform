@@ -273,40 +273,41 @@ async function loginVolunteer() {
 
 // دوال المستخدمين
 async function registerUser() {
-async function registerUser() {
-    const name = document.getElementById('user-name').value.trim();
-    const email = document.getElementById('user-email').value.trim();
-    const phone = document.getElementById('user-phone').value.trim();
+    const name = document.getElementById('user-name').value;
+    const email = document.getElementById('user-email').value;
+    const phone = document.getElementById('user-phone').value;
     const password = document.getElementById('user-password').value;
-
-    if (!name || !email || !phone || !password) {
-        showAlert("يرجى ملء جميع الحقول", "warning");
-        return;
-    }
-
-    try {
-        const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
-        const user = userCredential.user;
-
-        await db.collection('users').doc(user.uid).set({
-            name: name,
-            email: email,
-            phone: phone,
-            role: 'user',
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-
-        showAlert("تم إنشاء الحساب بنجاح!", "success");
-        showLogin('user');
-    } catch (error) {
-        let errorMessage = "حدث خطأ أثناء إنشاء الحساب";
-        if (error.code === 'auth/email-already-in-use') {
-            errorMessage = "هذا البريد الإلكتروني مسجل بالفعل";
-        } else if (error.code === 'auth/weak-password') {
-            errorMessage = "كلمة المرور ضعيفة، يجب أن تكون 6 أحرف على الأقل";
+    
+    if (name && email && phone && password) {
+        try {
+            const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
+            const user = userCredential.user;
+            
+            await db.collection('users').doc(user.uid).set({
+                name: name,
+                email: email,
+                phone: phone,
+                role: 'user',
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            
+            showAlert("تم إنشاء الحساب بنجاح!", "success");
+            showLogin('user');
+            
+        } catch (error) {
+            console.error("Error registering user: ", error);
+            let errorMessage = "حدث خطأ أثناء إنشاء الحساب";
+            
+            if (error.code === 'auth/email-already-in-use') {
+                errorMessage = "هذا البريد الإلكتروني مسجل بالفعل";
+            } else if (error.code === 'auth/weak-password') {
+                errorMessage = "كلمة المرور ضعيفة، يجب أن تكون 6 أحرف على الأقل";
+            }
+            
+            showAlert(errorMessage, "error");
         }
-        showAlert(errorMessage, "error");
-        console.error(error);
+    } else {
+        showAlert("يرجى ملء جميع الحقول", "warning");
     }
 }
 
@@ -1475,27 +1476,13 @@ function showPlatform(platform) {
 }
 
 function showRegister(platform) {
-    // تخفي كل النماذج أولاً
-    document.querySelectorAll('.form-container').forEach(form => {
-        form.style.display = 'none'; // إخفاء كامل عن طريق خاصية CSS display
-    });
-
-    // ثم تظهر النموذج المطلوب بشكل مباشر
-    const formToShow = document.getElementById(`${platform}-register`);
-    if (formToShow) {
-        formToShow.style.display = 'block'; // أو 'flex' أو حسب تصميم الصفحة
-    }
+    hideAllForms();
+    document.getElementById(`${platform}-register`).classList.remove('hidden');
 }
 
 function showLogin(platform) {
-    document.querySelectorAll('.form-container').forEach(form => {
-        form.style.display = 'none';
-    });
-
-    const formToShow = document.getElementById(`${platform}-login`);
-    if (formToShow) {
-        formToShow.style.display = 'block';
-    }
+    hideAllForms();
+    document.getElementById(`${platform}-login`).classList.remove('hidden');
 }
 
 function hideAllForms() {
@@ -1601,4 +1588,4 @@ window.registerPolice = registerPolice;
 window.loginPolice = loginPolice;
 window.registerVolunteer = registerVolunteer;
 window.loginVolunteer = loginVolunteer;
-window.submitVolunteerReport = addVolunteerReport; // إضافة اسم بديل للدالة
+window.submitVolunteerReport = addVolunteerReport;

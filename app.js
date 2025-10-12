@@ -1476,13 +1476,27 @@ function showPlatform(platform) {
 }
 
 function showRegister(platform) {
-    hideAllForms();
-    document.getElementById(`${platform}-register`).classList.remove('hidden');
+    // تخفي كل النماذج أولاً
+    document.querySelectorAll('.form-container').forEach(form => {
+        form.style.display = 'none'; // إخفاء كامل عن طريق خاصية CSS display
+    });
+
+    // ثم تظهر النموذج المطلوب بشكل مباشر
+    const formToShow = document.getElementById(`${platform}-register`);
+    if (formToShow) {
+        formToShow.style.display = 'block'; // أو 'flex' أو حسب تصميم الصفحة
+    }
 }
 
 function showLogin(platform) {
-    hideAllForms();
-    document.getElementById(`${platform}-login`).classList.remove('hidden');
+    document.querySelectorAll('.form-container').forEach(form => {
+        form.style.display = 'none';
+    });
+
+    const formToShow = document.getElementById(`${platform}-login`);
+    if (formToShow) {
+        formToShow.style.display = 'block';
+    }
 }
 
 function hideAllForms() {

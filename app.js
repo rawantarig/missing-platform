@@ -273,41 +273,40 @@ async function loginVolunteer() {
 
 // دوال المستخدمين
 async function registerUser() {
-    const name = document.getElementById('user-name').value;
-    const email = document.getElementById('user-email').value;
-    const phone = document.getElementById('user-phone').value;
+async function registerUser() {
+    const name = document.getElementById('user-name').value.trim();
+    const email = document.getElementById('user-email').value.trim();
+    const phone = document.getElementById('user-phone').value.trim();
     const password = document.getElementById('user-password').value;
-    
-    if (name && email && phone && password) {
-        try {
-            const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
-            const user = userCredential.user;
-            
-            await db.collection('users').doc(user.uid).set({
-                name: name,
-                email: email,
-                phone: phone,
-                role: 'user',
-                createdAt: firebase.firestore.FieldValue.serverTimestamp()
-            });
-            
-            showAlert("تم إنشاء الحساب بنجاح!", "success");
-            showLogin('user');
-            
-        } catch (error) {
-            console.error("Error registering user: ", error);
-            let errorMessage = "حدث خطأ أثناء إنشاء الحساب";
-            
-            if (error.code === 'auth/email-already-in-use') {
-                errorMessage = "هذا البريد الإلكتروني مسجل بالفعل";
-            } else if (error.code === 'auth/weak-password') {
-                errorMessage = "كلمة المرور ضعيفة، يجب أن تكون 6 أحرف على الأقل";
-            }
-            
-            showAlert(errorMessage, "error");
-        }
-    } else {
+
+    if (!name || !email || !phone || !password) {
         showAlert("يرجى ملء جميع الحقول", "warning");
+        return;
+    }
+
+    try {
+        const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
+        const user = userCredential.user;
+
+        await db.collection('users').doc(user.uid).set({
+            name: name,
+            email: email,
+            phone: phone,
+            role: 'user',
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+
+        showAlert("تم إنشاء الحساب بنجاح!", "success");
+        showLogin('user');
+    } catch (error) {
+        let errorMessage = "حدث خطأ أثناء إنشاء الحساب";
+        if (error.code === 'auth/email-already-in-use') {
+            errorMessage = "هذا البريد الإلكتروني مسجل بالفعل";
+        } else if (error.code === 'auth/weak-password') {
+            errorMessage = "كلمة المرور ضعيفة، يجب أن تكون 6 أحرف على الأقل";
+        }
+        showAlert(errorMessage, "error");
+        console.error(error);
     }
 }
 

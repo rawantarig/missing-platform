@@ -1,4 +1,17 @@
-// app.js - التطبيق الرئيسي بعد فصل قاعدة البيانات
+// تهيئة Firebase
+const firebaseConfig = {
+    apiKey: "AIzaSyCd5KilOByaq7s5r3sGo6sl555q9QKSpxE",
+    authDomain: "missing-platform-db.firebaseapp.com",
+    projectId: "missing-platform-db",
+    storageBucket: "missing-platform-db.firebasestorage.app",
+    messagingSenderId: "960039466245",
+    appId: "1:960039466245:web:185365d1eefe93e6edb36c"
+};
+
+// Initialize Firebase
+const app = firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
 
 // بيانات التطبيق
 const appData = {
@@ -9,27 +22,35 @@ const appData = {
 };
 
 // ==================== مستمع حالة المصادقة ====================
-firebase.auth().onAuthStateChanged(async (user) => {
+firebase.auth().onAuthStateChanged((user) => {
     if (user) {
-        // المستخدم مسجل دخول - جلب بياناته
-        const result = await database.getUserById(user.uid);
-        if (result.success && result.user) {
-            appData.currentUser = result.user;
-            localStorage.setItem('currentUser', JSON.stringify(appData.currentUser));
-            
-            // توجيه المستخدم حسب الصلاحية
-            if (appData.currentUser.role === 'user') {
-                await showUserDashboard();
-            } else if (appData.currentUser.role === 'police') {
-                await showPoliceDashboard();
-            } else if (appData.currentUser.role === 'volunteer') {
-                await showVolunteerDashboard();
+        // المستخدم مسجل دخول - جلب بياناته من Firestore
+        db.collection('users').doc(user.uid).get().then((doc) => {
+            if (doc.exists) {
+                const userData = doc.data();
+                appData.currentUser = {
+                    id: user.uid,
+                    ...userData
+                };
+                localStorage.setItem('currentUser', JSON.stringify(appData.currentUser));
+                
+                // توجيه المستخدم حسب الصلاحية
+                if (userData.role === 'user') {
+                    showUserDashboard();
+                } else if (userData.role === 'police') {
+                    showPoliceDashboard();
+                } else if (userData.role === 'volunteer') {
+                    showVolunteerDashboard();
+                }
             }
-        }
+        }).catch((error) => {
+            console.error("Error getting user data:", error);
+        });
     } else {
         // المستخدم غير مسجل دخول
         appData.currentUser = null;
         localStorage.removeItem('currentUser');
+        showMainPage();
     }
 });
 
@@ -76,52 +97,181 @@ function readFileAsDataURL(file) {
     });
 }
 
-// ==================== دوال EmailJS ====================
-function sendLoginNotification(toEmail, userName, report) {
-    console.log('📧 محاولة إرسال إيميل إلى:', toEmail);
+// ==================== دوال التسجيل والدخول ====================
+
+// دوال الشرطة
+async function registerPolice() {
+    const name = document.getElementById('police-name').value;
+    const email = document.getElementById('police-email').value;
+    const password = document.getElementById('police-password').value;
+    const policeNumber = document.getElementById('police-number').value;
     
-    emailjs.send("service_sbkepx6", "template_m7905go", {
-        to_email: toEmail,
-        to_name: userName,
-        missing_name: report.missingName,
-        missing_age: report.missingAge,
-        missing_type: report.missingType,
-        last_call: report.lastCall,
-        last_location: report.lastLocation,
-        missing_height: report.missingHeight,
-        missing_description: report.missingDescription,
-        reporter_phone: report.reporterPhone,
-        reporter_name: report.reporterName,
-        additional_contact: report.additionalContact || 'لا يوجد'
-    })
-    .then(function(response) {
-        console.log('✅ تم إرسال الإيميل بنجاح', response.status, response.text);
-        showAlert('✅ تم إرسال الإشعار بنجاح إلى ' + toEmail, 'success');
-    }, function(error) {
-        console.log('❌ فشل إرسال الإيميل', error);
-        showAlert('❌ فشل إرسال الإيميل، تم استخدام النظام البديل', 'warning');
-        sendAlternativeNotification(toEmail, report);
-    });
+    if (name && email && password && policeNumber) {
+        try {
+            const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
+            const user = userCredential.user;
+            
+            await db.collection('users').doc(user.uid).set({
+                name: name,
+                email: email,
+                policeNumber: policeNumber,
+                role: 'police',
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            
+            showAlert("تم إنشاء حساب الشرطة بنجاح!", "success");
+            showLogin('police');
+            
+        } catch (error) {
+            console.error("Error registering police: ", error);
+            let errorMessage = "حدث خطأ أثناء إنشاء الحساب";
+            
+            if (error.code === 'auth/email-already-in-use') {
+                errorMessage = "هذا البريد الإلكتروني مسجل بالفعل";
+            } else if (error.code === 'auth/weak-password') {
+                errorMessage = "كلمة المرور ضعيفة، يجب أن تكون 6 أحرف على الأقل";
+            }
+            
+            showAlert(errorMessage, "error");
+        }
+    } else {
+        showAlert("يرجى ملء جميع الحقول", "warning");
+    }
 }
 
-function sendAlternativeNotification(email, report) {
-    console.log('🔄 استخدام النظام البديل للإشعارات');
-    const backupNotification = {
-        id: Date.now(),
-        to: email,
-        report: report,
-        timestamp: new Date().toLocaleString('ar-EG'),
-        type: 'backup'
-    };
+async function loginPolice() {
+    const email = document.getElementById('police-login-email').value;
+    const password = document.getElementById('police-login-password').value;
     
-    let backups = JSON.parse(localStorage.getItem('emailBackups')) || [];
-    backups.push(backupNotification);
-    localStorage.setItem('emailBackups', JSON.stringify(backups));
-    
-    showAlert('💾 تم حفظ الإشعار في النظام البديل', 'info');
+    try {
+        const userCredential = await firebase.auth().signInWithEmailAndPassword(email, password);
+        const user = userCredential.user;
+        
+        const userDoc = await db.collection('users').doc(user.uid).get();
+        
+        if (userDoc.exists) {
+            const userData = userDoc.data();
+            
+            appData.currentUser = {
+                id: user.uid,
+                ...userData
+            };
+            
+            localStorage.setItem('currentUser', JSON.stringify(appData.currentUser));
+            
+            if (userData.role === 'police') {
+                await showPoliceDashboard();
+            } else {
+                showAlert("ليس لديك صلاحية الدخول كشرطة", "error");
+                logoutUser();
+            }
+        } else {
+            showAlert("بيانات المستخدم غير موجودة", "error");
+        }
+        
+    } catch (error) {
+        console.error("Error logging in police: ", error);
+        let errorMessage = "البريد الإلكتروني أو كلمة المرور غير صحيحة";
+        
+        if (error.code === 'auth/user-not-found') {
+            errorMessage = "المستخدم غير موجود";
+        } else if (error.code === 'auth/wrong-password') {
+            errorMessage = "كلمة المرور غير صحيحة";
+        } else if (error.code === 'auth/invalid-email') {
+            errorMessage = "البريد الإلكتروني غير صالح";
+        }
+        
+        showAlert(errorMessage, "error");
+    }
 }
 
-// ==================== دوال المستخدمين المعدلة ====================
+// دوال المتطوعين
+async function registerVolunteer() {
+    const name = document.getElementById('volunteer-name').value;
+    const email = document.getElementById('volunteer-email').value;
+    const phone = document.getElementById('volunteer-phone').value;
+    const password = document.getElementById('volunteer-password').value;
+    
+    if (name && email && phone && password) {
+        try {
+            const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
+            const user = userCredential.user;
+            
+            await db.collection('users').doc(user.uid).set({
+                name: name,
+                email: email,
+                phone: phone,
+                role: 'volunteer',
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            
+            showAlert("تم إنشاء حساب المتطوع بنجاح!", "success");
+            showLogin('volunteer');
+            
+        } catch (error) {
+            console.error("Error registering volunteer: ", error);
+            let errorMessage = "حدث خطأ أثناء إنشاء الحساب";
+            
+            if (error.code === 'auth/email-already-in-use') {
+                errorMessage = "هذا البريد الإلكتروني مسجل بالفعل";
+            } else if (error.code === 'auth/weak-password') {
+                errorMessage = "كلمة المرور ضعيفة، يجب أن تكون 6 أحرف على الأقل";
+            }
+            
+            showAlert(errorMessage, "error");
+        }
+    } else {
+        showAlert("يرجى ملء جميع الحقول", "warning");
+    }
+}
+
+async function loginVolunteer() {
+    const email = document.getElementById('volunteer-login-email').value;
+    const password = document.getElementById('volunteer-login-password').value;
+    
+    try {
+        const userCredential = await firebase.auth().signInWithEmailAndPassword(email, password);
+        const user = userCredential.user;
+        
+        const userDoc = await db.collection('users').doc(user.uid).get();
+        
+        if (userDoc.exists) {
+            const userData = userDoc.data();
+            
+            appData.currentUser = {
+                id: user.uid,
+                ...userData
+            };
+            
+            localStorage.setItem('currentUser', JSON.stringify(appData.currentUser));
+            
+            if (userData.role === 'volunteer') {
+                await showVolunteerDashboard();
+            } else {
+                showAlert("ليس لديك صلاحية الدخول كمتطوع", "error");
+                logoutUser();
+            }
+        } else {
+            showAlert("بيانات المستخدم غير موجودة", "error");
+        }
+        
+    } catch (error) {
+        console.error("Error logging in volunteer: ", error);
+        let errorMessage = "البريد الإلكتروني أو كلمة المرور غير صحيحة";
+        
+        if (error.code === 'auth/user-not-found') {
+            errorMessage = "المستخدم غير موجود";
+        } else if (error.code === 'auth/wrong-password') {
+            errorMessage = "كلمة المرور غير صحيحة";
+        } else if (error.code === 'auth/invalid-email') {
+            errorMessage = "البريد الإلكتروني غير صالح";
+        }
+        
+        showAlert(errorMessage, "error");
+    }
+}
+
+// دوال المستخدمين
 async function registerUser() {
     const name = document.getElementById('user-name').value;
     const email = document.getElementById('user-email').value;
@@ -129,17 +279,28 @@ async function registerUser() {
     const password = document.getElementById('user-password').value;
     
     if (name && email && phone && password) {
-        const result = await database.registerUser({ name, email, phone, password });
-        
-        if (result.success) {
+        try {
+            const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
+            const user = userCredential.user;
+            
+            await db.collection('users').doc(user.uid).set({
+                name: name,
+                email: email,
+                phone: phone,
+                role: 'user',
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            
             showAlert("تم إنشاء الحساب بنجاح!", "success");
             showLogin('user');
-        } else {
+            
+        } catch (error) {
+            console.error("Error registering user: ", error);
             let errorMessage = "حدث خطأ أثناء إنشاء الحساب";
             
-            if (result.error && result.error.code === 'auth/email-already-in-use') {
+            if (error.code === 'auth/email-already-in-use') {
                 errorMessage = "هذا البريد الإلكتروني مسجل بالفعل";
-            } else if (result.error && result.error.code === 'auth/weak-password') {
+            } else if (error.code === 'auth/weak-password') {
                 errorMessage = "كلمة المرور ضعيفة، يجب أن تكون 6 أحرف على الأقل";
             }
             
@@ -154,27 +315,41 @@ async function loginUser() {
     const email = document.getElementById('user-login-email').value;
     const password = document.getElementById('user-login-password').value;
     
-    const result = await database.loginUser(email, password);
-    
-    if (result.success) {
-        appData.currentUser = result.user;
-        localStorage.setItem('currentUser', JSON.stringify(appData.currentUser));
+    try {
+        const userCredential = await firebase.auth().signInWithEmailAndPassword(email, password);
+        const user = userCredential.user;
         
-        if (appData.currentUser.role === 'user') {
-            await showUserDashboard();
-        } else if (appData.currentUser.role === 'police') {
-            await showPoliceDashboard();
-        } else if (appData.currentUser.role === 'volunteer') {
-            await showVolunteerDashboard();
+        const userDoc = await db.collection('users').doc(user.uid).get();
+        
+        if (userDoc.exists) {
+            const userData = userDoc.data();
+            
+            appData.currentUser = {
+                id: user.uid,
+                ...userData
+            };
+            
+            localStorage.setItem('currentUser', JSON.stringify(appData.currentUser));
+            
+            if (userData.role === 'user') {
+                await showUserDashboard();
+            } else {
+                showAlert("ليس لديك صلاحية الدخول كمستخدم", "error");
+                logoutUser();
+            }
+        } else {
+            showAlert("بيانات المستخدم غير موجودة", "error");
         }
-    } else {
+        
+    } catch (error) {
+        console.error("Error logging in: ", error);
         let errorMessage = "البريد الإلكتروني أو كلمة المرور غير صحيحة";
         
-        if (result.error && result.error.code === 'auth/user-not-found') {
+        if (error.code === 'auth/user-not-found') {
             errorMessage = "المستخدم غير موجود";
-        } else if (result.error && result.error.code === 'auth/wrong-password') {
+        } else if (error.code === 'auth/wrong-password') {
             errorMessage = "كلمة المرور غير صحيحة";
-        } else if (result.error && result.error.code === 'auth/invalid-email') {
+        } else if (error.code === 'auth/invalid-email') {
             errorMessage = "البريد الإلكتروني غير صالح";
         }
         
@@ -184,15 +359,14 @@ async function loginUser() {
 
 // ==================== إضافة دالة الخروج ====================
 async function logoutUser() {
-    const result = await database.logoutUser();
-    
-    if (result.success) {
+    try {
+        await firebase.auth().signOut();
         appData.currentUser = null;
         localStorage.removeItem('currentUser');
         showMainPage();
         showAlert("تم تسجيل الخروج بنجاح", "success");
-    } else {
-        showAlert("حدث خطأ أثناء تسجيل الخروج", "error");
+    } catch (error) {
+        console.error("Error signing out: ", error);
     }
 }
 
@@ -214,7 +388,15 @@ async function showUserDashboard() {
     await updateUserBadges();
 }
 
-// ==================== دوال البلاغات المعدلة ====================
+function showUserSection(section) {
+    document.getElementById('add-report').classList.add('hidden');
+    document.getElementById('my-reports').classList.add('hidden');
+    document.getElementById('user-notifications').classList.add('hidden');
+    document.getElementById('police-reports').classList.add('hidden');
+    document.getElementById(section).classList.remove('hidden');
+}
+
+// ==================== دوال البلاغات للمستخدم ====================
 async function addUserReport() {
     const missingName = document.getElementById('missing-name').value;
     const missingAge = document.getElementById('missing-age').value;
@@ -251,35 +433,34 @@ async function addUserReport() {
                 missingDescription: missingDescription,
                 photo: photoData,
                 status: "جديد",
-                date: new Date().toLocaleDateString('ar-EG')
+                date: new Date().toLocaleDateString('ar-EG'),
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
             };
             
-            // حفظ البلاغ باستخدام قاعدة البيانات المنفصلة
-            const result = await database.addReport(newReport);
+            // حفظ البلاغ في Firestore
+            const reportRef = await db.collection('reports').add(newReport);
             
-            if (result.success) {
-                // إرسال إشعار للمستخدم
-                await database.addNotification({
-                    userId: appData.currentUser.id,
-                    message: `تم إرسال بلاغك بنجاح عن: ${missingName}`,
-                    type: 'success',
-                    read: false
-                });
-                
-                // إرسال إشعار للشرطة
-                await database.addNotification({
-                    type: 'police',
-                    message: `بلاغ جديد من ${appData.currentUser.name} عن: ${missingName}`,
-                    reportId: result.reportId,
-                    read: false
-                });
-                
-                showAlert("تم إرسال البلاغ بنجاح! تم إخطار الشرطة", "success");
-                resetReportForm();
-                await loadUserReports();
-            } else {
-                showAlert("حدث خطأ أثناء إرسال البلاغ", "error");
-            }
+            // إرسال إشعار للمستخدم
+            await db.collection('notifications').add({
+                userId: appData.currentUser.id,
+                message: `تم إرسال بلاغك بنجاح عن: ${missingName}`,
+                type: 'success',
+                read: false,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            
+            // إرسال إشعار للشرطة
+            await db.collection('notifications').add({
+                type: 'police',
+                message: `بلاغ جديد من ${appData.currentUser.name} عن: ${missingName}`,
+                reportId: reportRef.id,
+                read: false,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            
+            showAlert("تم إرسال البلاغ بنجاح! تم إخطار الشرطة", "success");
+            resetReportForm();
+            await loadUserReports();
             
         } catch (error) {
             console.error("Error adding report: ", error);
@@ -296,15 +477,23 @@ async function loadUserReports() {
     
     myReportsList.innerHTML = '';
     
-    const result = await database.getUserReports(appData.currentUser.id);
-    
-    if (result.success) {
-        if (result.reports.length === 0) {
+    try {
+        const snapshot = await db.collection('reports')
+            .where('userId', '==', appData.currentUser.id)
+            .orderBy('createdAt', 'desc')
+            .get();
+        
+        if (snapshot.empty) {
             myReportsList.innerHTML = '<p>لم تقم بإضافة أي بلاغات بعد</p>';
             return;
         }
         
-        result.reports.forEach(report => {
+        snapshot.forEach(doc => {
+            const report = {
+                id: doc.id,
+                ...doc.data()
+            };
+            
             const reportItem = document.createElement('div');
             reportItem.className = `report-item status-${getStatusClass(report.status)}`;
             reportItem.innerHTML = `
@@ -320,26 +509,27 @@ async function loadUserReports() {
                     </div>
                 ` : ''}
                 <div class="action-buttons">
-                    <button class="btn btn-primary" onclick="editUserReport('${report.id}')">تعديل</button>
-                    <button class="btn btn-danger" onclick="deleteUserReport('${report.id}')">حذف</button>
+                    <button class="btn btn-primary" onclick="editUserReport('${doc.id}')">تعديل</button>
+                    <button class="btn btn-danger" onclick="deleteUserReport('${doc.id}')">حذف</button>
                 </div>
-                <div id="edit-form-${report.id}" class="edit-form"></div>
+                <div id="edit-form-${doc.id}" class="edit-form"></div>
             `;
             
             myReportsList.appendChild(reportItem);
         });
-    } else {
-        console.error("Error loading user reports: ", result.error);
+        
+    } catch (error) {
+        console.error("Error loading user reports: ", error);
         myReportsList.innerHTML = '<p>حدث خطأ أثناء تحميل البلاغات</p>';
     }
 }
 
 async function editUserReport(reportId) {
     try {
-        const result = await database.getReportById(reportId);
-        if (!result.success) return;
+        const doc = await db.collection('reports').doc(reportId).get();
+        if (!doc.exists) return;
         
-        const report = result.report;
+        const report = doc.data();
         const editForm = document.getElementById(`edit-form-${reportId}`);
         editForm.innerHTML = `
             <div class="edit-form-content">
@@ -378,20 +568,17 @@ async function saveUserReport(reportId) {
         const lastLocation = document.getElementById(`edit-last-location-${reportId}`).value;
         const missingDescription = document.getElementById(`edit-missing-description-${reportId}`).value;
         
-        const result = await database.updateReport(reportId, {
-            missingName,
-            missingAge,
-            lastLocation,
-            missingDescription
+        await db.collection('reports').doc(reportId).update({
+            missingName: missingName,
+            missingAge: missingAge,
+            lastLocation: lastLocation,
+            missingDescription: missingDescription,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         });
         
-        if (result.success) {
-            document.getElementById(`edit-form-${reportId}`).style.display = 'none';
-            await loadUserReports();
-            showAlert('تم حفظ التعديلات بنجاح', 'success');
-        } else {
-            showAlert("حدث خطأ أثناء حفظ التعديلات", "error");
-        }
+        document.getElementById(`edit-form-${reportId}`).style.display = 'none';
+        await loadUserReports();
+        showAlert('تم حفظ التعديلات بنجاح', 'success');
     } catch (error) {
         console.error("Error saving report: ", error);
         showAlert("حدث خطأ أثناء حفظ التعديلات", "error");
@@ -400,13 +587,13 @@ async function saveUserReport(reportId) {
 
 async function deleteUserReport(reportId) {
     if (confirm('هل أنت متأكد من حذف هذا البلاغ؟')) {
-        const result = await database.deleteReport(reportId);
-        
-        if (result.success) {
+        try {
+            await db.collection('reports').doc(reportId).delete();
             await loadUserReports();
             await updateUserBadges();
             showAlert('تم حذف البلاغ بنجاح', 'success');
-        } else {
+        } catch (error) {
+            console.error("Error deleting report: ", error);
             showAlert('حدث خطأ أثناء حذف البلاغ', 'error');
         }
     }
@@ -420,41 +607,47 @@ async function loadPoliceReportsForUser() {
     
     try {
         // الحصول على تقارير الشرطة المرتبطة ببلاغات المستخدم
-        const userReportsResult = await database.getUserReports(appData.currentUser.id);
+        const userReportsSnapshot = await db.collection('reports')
+            .where('userId', '==', appData.currentUser.id)
+            .get();
         
-        if (!userReportsResult.success || userReportsResult.reports.length === 0) {
+        if (userReportsSnapshot.empty) {
             policeReportsList.innerHTML = '<p>لا توجد تقارير من الشرطة بعد</p>';
             return;
         }
         
-        const userReportIds = userReportsResult.reports.map(report => report.id);
+        const userReportIds = userReportsSnapshot.docs.map(doc => doc.id);
         
-        // جلب تقارير الشرطة المرتبطة ببلاغات المستخدم
-        let hasPoliceReports = false;
+        const policeReportsSnapshot = await db.collection('policeReports')
+            .where('reportId', 'in', userReportIds)
+            .orderBy('createdAt', 'desc')
+            .get();
         
-        for (const reportId of userReportIds) {
-            const policeReportsResult = await database.getPoliceReportsForReport(reportId);
-            
-            if (policeReportsResult.success && policeReportsResult.policeReports.length > 0) {
-                hasPoliceReports = true;
-                
-                policeReportsResult.policeReports.forEach(policeReport => {
-                    const reportItem = document.createElement('div');
-                    reportItem.className = 'report-item';
-                    reportItem.innerHTML = `
-                        <h3>تقرير الشرطة عن: ${policeReport.missingName || 'مفقود'}</h3>
-                        <p><strong>محتوى التقرير:</strong> ${policeReport.content}</p>
-                        <p><strong>تاريخ التقرير:</strong> ${new Date(policeReport.createdAt?.toDate()).toLocaleDateString('ar-EG')}</p>
-                        <p><strong>من:</strong> ${policeReport.policeName}</p>
-                    `;
-                    policeReportsList.appendChild(reportItem);
-                });
-            }
-        }
-        
-        if (!hasPoliceReports) {
+        if (policeReportsSnapshot.empty) {
             policeReportsList.innerHTML = '<p>لا توجد تقارير من الشرطة بعد</p>';
+            return;
         }
+        
+        policeReportsSnapshot.forEach(async (doc) => {
+            const policeReport = {
+                id: doc.id,
+                ...doc.data()
+            };
+            
+            const reportDoc = await db.collection('reports').doc(policeReport.reportId).get();
+            if (reportDoc.exists) {
+                const report = reportDoc.data();
+                const reportItem = document.createElement('div');
+                reportItem.className = 'report-item';
+                reportItem.innerHTML = `
+                    <h3>تقرير الشرطة عن: ${report.missingName}</h3>
+                    <p><strong>محتوى التقرير:</strong> ${policeReport.content}</p>
+                    <p><strong>تاريخ التقرير:</strong> ${new Date(policeReport.createdAt.toDate()).toLocaleDateString('ar-EG')}</p>
+                    <p><strong>حالة البلاغ:</strong> ${report.status}</p>
+                `;
+                policeReportsList.appendChild(reportItem);
+            }
+        });
         
     } catch (error) {
         console.error("Error loading police reports: ", error);
@@ -462,57 +655,71 @@ async function loadPoliceReportsForUser() {
     }
 }
 
-// ==================== دوال الإشعارات المعدلة ====================
+// ==================== دوال الإشعارات للمستخدم ====================
 async function loadUserNotifications() {
     const notificationsList = document.getElementById('user-notifications-list');
     if (!notificationsList) return;
     
     notificationsList.innerHTML = '';
     
-    const result = await database.getUserNotifications(appData.currentUser.id);
-    
-    if (result.success) {
-        if (result.notifications.length === 0) {
+    try {
+        const snapshot = await db.collection('notifications')
+            .where('userId', '==', appData.currentUser.id)
+            .where('read', '==', false)
+            .orderBy('createdAt', 'desc')
+            .get();
+        
+        if (snapshot.empty) {
             notificationsList.innerHTML = '<p>لا توجد إشعارات</p>';
             return;
         }
         
-        result.notifications.forEach(notification => {
+        snapshot.forEach(doc => {
+            const notification = {
+                id: doc.id,
+                ...doc.data()
+            };
+            
             const notificationItem = document.createElement('div');
             notificationItem.className = 'notification-item unread';
             notificationItem.innerHTML = `
                 <p><strong>${notification.message}</strong></p>
-                <p><small>${new Date(notification.createdAt?.toDate()).toLocaleString('ar-EG')}</small></p>
-                <button class="mark-read" onclick="markNotificationAsRead('${notification.id}')">تمت المشاهدة</button>
+                <p><small>${new Date(notification.createdAt.toDate()).toLocaleString('ar-EG')}</small></p>
+                <button class="mark-read" onclick="markNotificationAsRead('${doc.id}')">تمت المشاهدة</button>
             `;
             notificationsList.appendChild(notificationItem);
         });
-    } else {
-        console.error("Error loading notifications: ", result.error);
+        
+    } catch (error) {
+        console.error("Error loading notifications: ", error);
         notificationsList.innerHTML = '<p>حدث خطأ أثناء تحميل الإشعارات</p>';
     }
 }
 
 async function markNotificationAsRead(notificationId) {
-    const result = await database.markNotificationAsRead(notificationId);
-    
-    if (result.success) {
+    try {
+        await db.collection('notifications').doc(notificationId).update({
+            read: true
+        });
         await loadUserNotifications();
         await updateUserBadges();
-    } else {
-        console.error("Error marking notification as read: ", result.error);
+    } catch (error) {
+        console.error("Error marking notification as read: ", error);
     }
 }
 
 async function updateUserBadges() {
     try {
         // تحديث شارة الإشعارات
-        const notificationsResult = await database.getUserNotifications(appData.currentUser.id);
-        const notificationsBadge = document.getElementById('user-notifications-badge');
+        const notificationsSnapshot = await db.collection('notifications')
+            .where('userId', '==', appData.currentUser.id)
+            .where('read', '==', false)
+            .get();
         
+        const notificationsBadge = document.getElementById('user-notifications-badge');
         if (notificationsBadge) {
-            if (notificationsResult.success && notificationsResult.notifications.length > 0) {
-                notificationsBadge.textContent = notificationsResult.notifications.length;
+            if (!notificationsSnapshot.empty) {
+                notificationsBadge.textContent = notificationsSnapshot.size;
                 notificationsBadge.style.display = 'inline-block';
             } else {
                 notificationsBadge.style.display = 'none';
@@ -520,12 +727,14 @@ async function updateUserBadges() {
         }
         
         // تحديث شارة البلاغات
-        const reportsResult = await database.getUserReports(appData.currentUser.id);
-        const reportsBadge = document.getElementById('my-reports-badge');
+        const reportsSnapshot = await db.collection('reports')
+            .where('userId', '==', appData.currentUser.id)
+            .get();
         
+        const reportsBadge = document.getElementById('my-reports-badge');
         if (reportsBadge) {
-            if (reportsResult.success && reportsResult.reports.length > 0) {
-                reportsBadge.textContent = reportsResult.reports.length;
+            if (!reportsSnapshot.empty) {
+                reportsBadge.textContent = reportsSnapshot.size;
                 reportsBadge.style.display = 'inline-block';
             } else {
                 reportsBadge.style.display = 'none';
@@ -537,7 +746,7 @@ async function updateUserBadges() {
     }
 }
 
-// ==================== دوال الشرطة ====================
+// ==================== دوال لوحة الشرطة ====================
 async function showPoliceDashboard() {
     document.getElementById('main-page').classList.add('hidden');
     document.getElementById('user-dashboard').classList.add('hidden');
@@ -552,6 +761,16 @@ async function showPoliceDashboard() {
     await updatePoliceBadges();
 }
 
+function showPoliceSection(section) {
+    document.getElementById('new-reports').classList.add('hidden');
+    document.getElementById('in-progress-reports').classList.add('hidden');
+    document.getElementById('resolved-reports').classList.add('hidden');
+    document.getElementById('volunteer-reports').classList.add('hidden');
+    document.getElementById('upload-reports').classList.add('hidden');
+    document.getElementById('police-notifications').classList.add('hidden');
+    document.getElementById(section).classList.remove('hidden');
+}
+
 async function loadAllReports() {
     const newReportsList = document.getElementById('new-reports-list');
     const inProgressList = document.getElementById('in-progress-list');
@@ -563,15 +782,20 @@ async function loadAllReports() {
     inProgressList.innerHTML = '';
     resolvedList.innerHTML = '';
     
-    const result = await database.getAllReports();
-    
-    if (result.success) {
-        if (result.reports.length === 0) {
+    try {
+        const snapshot = await db.collection('reports')
+            .orderBy('createdAt', 'desc')
+            .get();
+        
+        if (snapshot.empty) {
             newReportsList.innerHTML = '<p>لا توجد بلاغات</p>';
             return;
         }
         
-        appData.allReports = result.reports;
+        appData.allReports = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+        }));
         
         appData.allReports.forEach(report => {
             const reportItem = document.createElement('div');
@@ -590,8 +814,7 @@ async function loadAllReports() {
                     </div>
                 ` : ''}
                 <div class="action-buttons">
-                    <button class="btn btn-primary" onclick="showReportDetails('${report.id}')">عرض التفاصيل</button>
-                    <button class="btn btn-success" onclick="updateReportStatus('${report.id}', 'قيد المعالجة')">بدأ المعالجة</button>
+                    <button class="btn btn-primary" onclick="updateReportStatus('${report.id}', 'قيد المعالجة')">بدأ المعالجة</button>
                     <button class="btn btn-warning" onclick="updateReportStatus('${report.id}', 'تم الحل')">تم الحل</button>
                     <button class="btn btn-info" onclick="showAddPoliceReport('${report.id}')">إضافة تقرير</button>
                 </div>
@@ -605,31 +828,37 @@ async function loadAllReports() {
                 resolvedList.appendChild(reportItem);
             }
         });
-    } else {
-        console.error("Error loading all reports: ", result.error);
+        
+    } catch (error) {
+        console.error("Error loading all reports: ", error);
         newReportsList.innerHTML = '<p>حدث خطأ أثناء تحميل البلاغات</p>';
     }
 }
 
 async function updateReportStatus(reportId, newStatus) {
-    const result = await database.updateReportStatus(reportId, newStatus);
-    
-    if (result.success) {
+    try {
+        await db.collection('reports').doc(reportId).update({
+            status: newStatus,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
         // إرسال إشعار للمستخدم
-        const reportResult = await database.getReportById(reportId);
-        if (reportResult.success) {
-            const report = reportResult.report;
-            await database.addNotification({
+        const reportDoc = await db.collection('reports').doc(reportId).get();
+        if (reportDoc.exists) {
+            const report = reportDoc.data();
+            await db.collection('notifications').add({
                 userId: report.userId,
                 message: `تم تحديث حالة بلاغك عن ${report.missingName} إلى: ${newStatus}`,
                 type: 'info',
-                read: false
+                read: false,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
         }
         
         await loadAllReports();
         showAlert(`تم تحديث حالة البلاغ إلى: ${newStatus}`, 'success');
-    } else {
+    } catch (error) {
+        console.error("Error updating report status: ", error);
         showAlert("حدث خطأ أثناء تحديث حالة البلاغ", "error");
     }
 }
@@ -645,31 +874,35 @@ async function sendPoliceReport() {
     const content = document.getElementById('report-content').value;
     
     if (caseId && content) {
-        const policeReport = {
-            reportId: caseId,
-            content: content,
-            policeName: appData.currentUser.name
-        };
-        
-        const result = await database.addPoliceReport(policeReport);
-        
-        if (result.success) {
+        try {
+            const policeReport = {
+                reportId: caseId,
+                content: content,
+                policeName: appData.currentUser.name,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            };
+            
+            await db.collection('policeReports').add(policeReport);
+            
             // إرسال إشعار للمستخدم
-            const reportResult = await database.getReportById(caseId);
-            if (reportResult.success) {
-                const report = reportResult.report;
-                await database.addNotification({
+            const reportDoc = await db.collection('reports').doc(caseId).get();
+            if (reportDoc.exists) {
+                const report = reportDoc.data();
+                await db.collection('notifications').add({
                     userId: report.userId,
                     message: `تم إضافة تقرير جديد من الشرطة عن بلاغك: ${report.missingName}`,
                     type: 'info',
-                    read: false
+                    read: false,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
                 });
             }
             
             showAlert("تم إرسال التقرير بنجاح!", "success");
             document.getElementById('report-content').value = '';
             document.getElementById('upload-reports').classList.add('hidden');
-        } else {
+            
+        } catch (error) {
+            console.error("Error sending police report: ", error);
             showAlert("حدث خطأ أثناء إرسال التقرير", "error");
         }
     } else {
@@ -683,50 +916,64 @@ async function loadPoliceNotifications() {
     
     notificationsList.innerHTML = '';
     
-    const result = await database.getPoliceNotifications();
-    
-    if (result.success) {
-        if (result.notifications.length === 0) {
+    try {
+        const snapshot = await db.collection('notifications')
+            .where('type', '==', 'police')
+            .where('read', '==', false)
+            .orderBy('createdAt', 'desc')
+            .get();
+        
+        if (snapshot.empty) {
             notificationsList.innerHTML = '<p>لا توجد إشعارات</p>';
             return;
         }
         
-        result.notifications.forEach(notification => {
+        snapshot.forEach(doc => {
+            const notification = {
+                id: doc.id,
+                ...doc.data()
+            };
+            
             const notificationItem = document.createElement('div');
             notificationItem.className = 'notification-item unread';
             notificationItem.innerHTML = `
                 <p><strong>${notification.message}</strong></p>
-                <p><small>${new Date(notification.createdAt?.toDate()).toLocaleString('ar-EG')}</small></p>
-                <button class="mark-read" onclick="markPoliceNotificationAsRead('${notification.id}')">تمت المشاهدة</button>
+                <p><small>${new Date(notification.createdAt.toDate()).toLocaleString('ar-EG')}</small></p>
+                <button class="mark-read" onclick="markPoliceNotificationAsRead('${doc.id}')">تمت المشاهدة</button>
             `;
             notificationsList.appendChild(notificationItem);
         });
-    } else {
-        console.error("Error loading police notifications: ", result.error);
+        
+    } catch (error) {
+        console.error("Error loading police notifications: ", error);
         notificationsList.innerHTML = '<p>حدث خطأ أثناء تحميل الإشعارات</p>';
     }
 }
 
 async function markPoliceNotificationAsRead(notificationId) {
-    const result = await database.markNotificationAsRead(notificationId);
-    
-    if (result.success) {
+    try {
+        await db.collection('notifications').doc(notificationId).update({
+            read: true
+        });
         await loadPoliceNotifications();
         await updatePoliceBadges();
-    } else {
-        console.error("Error marking police notification as read: ", result.error);
+    } catch (error) {
+        console.error("Error marking police notification as read: ", error);
     }
 }
 
 async function updatePoliceBadges() {
     try {
         // شارة الإشعارات
-        const notificationsResult = await database.getPoliceNotifications();
-        const notificationsBadge = document.getElementById('police-notifications-badge');
+        const notificationsSnapshot = await db.collection('notifications')
+            .where('type', '==', 'police')
+            .where('read', '==', false)
+            .get();
         
+        const notificationsBadge = document.getElementById('police-notifications-badge');
         if (notificationsBadge) {
-            if (notificationsResult.success && notificationsResult.notifications.length > 0) {
-                notificationsBadge.textContent = notificationsResult.notifications.length;
+            if (!notificationsSnapshot.empty) {
+                notificationsBadge.textContent = notificationsSnapshot.size;
                 notificationsBadge.style.display = 'inline-block';
             } else {
                 notificationsBadge.style.display = 'none';
@@ -734,13 +981,14 @@ async function updatePoliceBadges() {
         }
         
         // شارة البلاغات الجديدة
-        const reportsResult = await database.getAllReports();
-        const newReportsBadge = document.getElementById('new-reports-badge');
+        const newReportsSnapshot = await db.collection('reports')
+            .where('status', '==', 'جديد')
+            .get();
         
-        if (newReportsBadge && reportsResult.success) {
-            const newReportsCount = reportsResult.reports.filter(report => report.status === 'جديد').length;
-            if (newReportsCount > 0) {
-                newReportsBadge.textContent = newReportsCount;
+        const newReportsBadge = document.getElementById('new-reports-badge');
+        if (newReportsBadge) {
+            if (!newReportsSnapshot.empty) {
+                newReportsBadge.textContent = newReportsSnapshot.size;
                 newReportsBadge.style.display = 'inline-block';
             } else {
                 newReportsBadge.style.display = 'none';
@@ -767,25 +1015,37 @@ async function showVolunteerDashboard() {
     await updateVolunteerBadges();
 }
 
+function showVolunteerSection(section) {
+    document.getElementById('all-reports').classList.add('hidden');
+    document.getElementById('select-case').classList.add('hidden');
+    document.getElementById('my-reports').classList.add('hidden');
+    document.getElementById('volunteer-notifications').classList.add('hidden');
+    document.getElementById(section).classList.remove('hidden');
+}
+
 async function loadCasesForVolunteer() {
-    const casesList = document.getElementById('cases-list');
+    const casesList = document.getElementById('all-reports-list');
     if (!casesList) return;
     
     casesList.innerHTML = '';
     
-    const result = await database.getAllReports();
-    
-    if (result.success) {
-        const availableCases = result.reports.filter(report => 
-            report.status === 'جديد' || report.status === 'قيد المعالجة'
-        );
+    try {
+        const snapshot = await db.collection('reports')
+            .where('status', 'in', ['جديد', 'قيد المعالجة'])
+            .orderBy('createdAt', 'desc')
+            .get();
         
-        if (availableCases.length === 0) {
+        if (snapshot.empty) {
             casesList.innerHTML = '<p>لا توجد حالات متاحة حالياً</p>';
             return;
         }
         
-        availableCases.forEach(report => {
+        snapshot.forEach(doc => {
+            const report = {
+                id: doc.id,
+                ...doc.data()
+            };
+            
             const caseItem = document.createElement('div');
             caseItem.className = 'case-item';
             caseItem.innerHTML = `
@@ -800,21 +1060,47 @@ async function loadCasesForVolunteer() {
                         <img src="${report.photo}" class="case-image" alt="صورة ${report.missingName}">
                     </div>
                 ` : ''}
-                <button class="btn btn-primary" onclick="selectCaseForVolunteer('${report.id}')">اختيار هذه الحالة</button>
+                <button class="btn btn-primary" onclick="selectCaseForVolunteer('${doc.id}')">اختيار هذه الحالة</button>
             `;
             casesList.appendChild(caseItem);
         });
-    } else {
-        console.error("Error loading cases for volunteer: ", result.error);
+        
+    } catch (error) {
+        console.error("Error loading cases for volunteer: ", error);
         casesList.innerHTML = '<p>حدث خطأ أثناء تحميل الحالات</p>';
     }
 }
 
 function selectCaseForVolunteer(reportId) {
     appData.currentReportId = reportId;
-    document.getElementById('select-case').classList.add('hidden');
-    document.getElementById('case-details').classList.remove('hidden');
+    showVolunteerSection('select-case');
     document.getElementById('volunteer-case').value = reportId;
+    
+    // تحميل تفاصيل الحالة
+    loadCaseDetails(reportId);
+}
+
+async function loadCaseDetails(reportId) {
+    try {
+        const doc = await db.collection('reports').doc(reportId).get();
+        if (doc.exists) {
+            const report = doc.data();
+            const caseInfo = document.getElementById('case-info');
+            caseInfo.innerHTML = `
+                <div class="case-details">
+                    <h4>${report.missingName}</h4>
+                    <p><strong>العمر:</strong> ${report.missingAge}</p>
+                    <p><strong>النوع:</strong> ${report.missingType}</p>
+                    <p><strong>آخر مكان:</strong> ${report.lastLocation}</p>
+                    <p><strong>آخر مكالمة:</strong> ${report.lastCall}</p>
+                    <p><strong>الوصف:</strong> ${report.missingDescription}</p>
+                    ${report.photo ? `<img src="${report.photo}" class="case-image" alt="صورة ${report.missingName}">` : ''}
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error("Error loading case details: ", error);
+    }
 }
 
 async function addVolunteerReport() {
@@ -825,37 +1111,40 @@ async function addVolunteerReport() {
     const email = document.getElementById('volunteer-email').value;
     
     if (caseId && info) {
-        const volunteerReport = {
-            reportId: caseId,
-            volunteerId: appData.currentUser.id,
-            volunteerName: appData.currentUser.name,
-            volunteerEmail: email || appData.currentUser.email,
-            volunteerPhone1: phone1,
-            volunteerPhone2: phone2,
-            content: info,
-            date: new Date().toLocaleDateString('ar-EG')
-        };
-        
-        const result = await database.addVolunteerReport(volunteerReport);
-        
-        if (result.success) {
+        try {
+            const volunteerReport = {
+                reportId: caseId,
+                volunteerId: appData.currentUser.id,
+                volunteerName: appData.currentUser.name,
+                volunteerEmail: email || appData.currentUser.email,
+                volunteerPhone1: phone1,
+                volunteerPhone2: phone2,
+                content: info,
+                date: new Date().toLocaleDateString('ar-EG'),
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            };
+            
+            await db.collection('volunteerReports').add(volunteerReport);
+            
             // إرسال إشعار للشرطة
-            const reportResult = await database.getReportById(caseId);
-            if (reportResult.success) {
-                const report = reportResult.report;
-                await database.addNotification({
+            const reportDoc = await db.collection('reports').doc(caseId).get();
+            if (reportDoc.exists) {
+                const report = reportDoc.data();
+                await db.collection('notifications').add({
                     type: 'police',
                     message: `تقرير جديد من المتطوع ${appData.currentUser.name} عن الحالة: ${report.missingName}`,
-                    read: false
+                    read: false,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
                 });
             }
             
             // إرسال إشعار للمتطوع
-            await database.addNotification({
+            await db.collection('notifications').add({
                 userId: appData.currentUser.id,
-                message: `تم إرسال تقريرك بنجاح عن الحالة: ${reportResult.report.missingName}`,
+                message: `تم إرسال تقريرك بنجاح عن الحالة: ${reportDoc.data().missingName}`,
                 type: 'success',
-                read: false
+                read: false,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
             
             showAlert("تم إرسال التقرير بنجاح! تم إخطار الشرطة", "success");
@@ -865,12 +1154,12 @@ async function addVolunteerReport() {
             document.getElementById('volunteer-phone-1').value = '';
             document.getElementById('volunteer-phone-2').value = '';
             document.getElementById('volunteer-email').value = appData.currentUser.email;
-            document.getElementById('case-details').classList.add('hidden');
-            document.getElementById('volunteer-case').value = '';
             
             await loadMyVolunteerReports();
             await updateVolunteerBadges();
-        } else {
+            
+        } catch (error) {
+            console.error("Error adding volunteer report: ", error);
             showAlert("حدث خطأ أثناء إرسال التقرير", "error");
         }
     } else {
@@ -884,20 +1173,26 @@ async function loadMyVolunteerReports() {
     
     myReportsList.innerHTML = '';
     
-    const result = await database.getVolunteerReportsByVolunteer(appData.currentUser.id);
-    
-    if (result.success) {
-        if (result.volunteerReports.length === 0) {
+    try {
+        const snapshot = await db.collection('volunteerReports')
+            .where('volunteerId', '==', appData.currentUser.id)
+            .orderBy('createdAt', 'desc')
+            .get();
+        
+        if (snapshot.empty) {
             myReportsList.innerHTML = '<p>لم تقم برفع أي تقارير بعد</p>';
             return;
         }
         
-        // جلب بيانات البلاغات المرتبطة
-        for (const vReport of result.volunteerReports) {
-            const reportResult = await database.getReportById(vReport.reportId);
+        snapshot.forEach(async (doc) => {
+            const vReport = {
+                id: doc.id,
+                ...doc.data()
+            };
             
-            if (reportResult.success) {
-                const report = reportResult.report;
+            const reportDoc = await db.collection('reports').doc(vReport.reportId).get();
+            if (reportDoc.exists) {
+                const report = reportDoc.data();
                 const reportItem = document.createElement('div');
                 reportItem.className = 'report-item';
                 reportItem.innerHTML = `
@@ -912,26 +1207,27 @@ async function loadMyVolunteerReports() {
                     <p><strong>تاريخ الإرسال:</strong> ${vReport.date}</p>
                     <p><strong>حالة البلاغ:</strong> ${report.status}</p>
                     <div class="action-buttons">
-                        <button class="btn btn-primary" onclick="editVolunteerReport('${vReport.id}')">تعديل التقرير</button>
-                        <button class="btn btn-danger" onclick="deleteVolunteerReport('${vReport.id}')">حذف التقرير</button>
+                        <button class="btn btn-primary" onclick="editVolunteerReport('${doc.id}')">تعديل التقرير</button>
+                        <button class="btn btn-danger" onclick="deleteVolunteerReport('${doc.id}')">حذف التقرير</button>
                     </div>
-                    <div id="edit-volunteer-form-${vReport.id}" class="edit-form"></div>
+                    <div id="edit-volunteer-form-${doc.id}" class="edit-form"></div>
                 `;
                 myReportsList.appendChild(reportItem);
             }
-        }
-    } else {
-        console.error("Error loading volunteer reports: ", result.error);
+        });
+        
+    } catch (error) {
+        console.error("Error loading volunteer reports: ", error);
         myReportsList.innerHTML = '<p>حدث خطأ أثناء تحميل التقارير</p>';
     }
 }
 
 async function editVolunteerReport(reportId) {
     try {
-        const result = await database.getVolunteerReportById(reportId);
-        if (!result.success) return;
+        const doc = await db.collection('volunteerReports').doc(reportId).get();
+        if (!doc.exists) return;
         
-        const vReport = result.volunteerReport;
+        const vReport = doc.data();
         const editForm = document.getElementById(`edit-volunteer-form-${reportId}`);
         editForm.innerHTML = `
             <div class="edit-form-content">
@@ -970,20 +1266,17 @@ async function saveVolunteerReport(reportId) {
         const volunteerPhone1 = document.getElementById(`edit-volunteer-phone1-${reportId}`).value;
         const volunteerPhone2 = document.getElementById(`edit-volunteer-phone2-${reportId}`).value;
 
-        const result = await database.updateVolunteerReport(reportId, {
-            content,
-            volunteerEmail,
-            volunteerPhone1,
-            volunteerPhone2
+        await db.collection('volunteerReports').doc(reportId).update({
+            content: content,
+            volunteerEmail: volunteerEmail,
+            volunteerPhone1: volunteerPhone1,
+            volunteerPhone2: volunteerPhone2,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         });
 
-        if (result.success) {
-            document.getElementById(`edit-volunteer-form-${reportId}`).style.display = 'none';
-            await loadMyVolunteerReports();
-            showAlert('تم حفظ التعديلات بنجاح', 'success');
-        } else {
-            showAlert("حدث خطأ أثناء حفظ التعديلات", "error");
-        }
+        document.getElementById(`edit-volunteer-form-${reportId}`).style.display = 'none';
+        await loadMyVolunteerReports();
+        showAlert('تم حفظ التعديلات بنجاح', 'success');
     } catch (error) {
         console.error("Error saving volunteer report: ", error);
         showAlert("حدث خطأ أثناء حفظ التعديلات", "error");
@@ -992,13 +1285,13 @@ async function saveVolunteerReport(reportId) {
 
 async function deleteVolunteerReport(reportId) {
     if (confirm('هل أنت متأكد من حذف هذا التقرير؟')) {
-        const result = await database.deleteVolunteerReport(reportId);
-        
-        if (result.success) {
+        try {
+            await db.collection('volunteerReports').doc(reportId).delete();
             await loadMyVolunteerReports();
             await updateVolunteerBadges();
             showAlert('تم حذف التقرير بنجاح', 'success');
-        } else {
+        } catch (error) {
+            console.error("Error deleting volunteer report: ", error);
             showAlert('حدث خطأ أثناء حذف التقرير', 'error');
         }
     }
@@ -1010,20 +1303,25 @@ async function loadVolunteerReports() {
     
     volunteerReportsList.innerHTML = '';
     
-    const result = await database.getAllVolunteerReports();
-    
-    if (result.success) {
-        if (result.volunteerReports.length === 0) {
+    try {
+        const snapshot = await db.collection('volunteerReports')
+            .orderBy('createdAt', 'desc')
+            .get();
+        
+        if (snapshot.empty) {
             volunteerReportsList.innerHTML = '<p>لا توجد تقارير من المتطوعين</p>';
             return;
         }
         
-        // جلب بيانات البلاغات المرتبطة
-        for (const vReport of result.volunteerReports) {
-            const reportResult = await database.getReportById(vReport.reportId);
+        snapshot.forEach(async (doc) => {
+            const vReport = {
+                id: doc.id,
+                ...doc.data()
+            };
             
-            if (reportResult.success) {
-                const report = reportResult.report;
+            const reportDoc = await db.collection('reports').doc(vReport.reportId).get();
+            if (reportDoc.exists) {
+                const report = reportDoc.data();
                 const reportItem = document.createElement('div');
                 reportItem.className = 'report-item';
                 reportItem.innerHTML = `
@@ -1041,14 +1339,15 @@ async function loadVolunteerReports() {
                     <p><strong>تاريخ الإرسال:</strong> ${vReport.date}</p>
                     <div class="action-buttons">
                         <button class="btn btn-success" onclick="contactVolunteer('${vReport.volunteerEmail}', '${vReport.volunteerPhone1}', '${vReport.volunteerPhone2}', '${vReport.volunteerName}')">📞 الاتصال بالمتطوع</button>
-                        <button class="btn btn-danger" onclick="deleteVolunteerReportFromPolice('${vReport.id}')">حذف التقرير</button>
+                        <button class="btn btn-danger" onclick="deleteVolunteerReportFromPolice('${doc.id}')">حذف التقرير</button>
                     </div>
                 `;
                 volunteerReportsList.appendChild(reportItem);
             }
-        }
-    } else {
-        console.error("Error loading volunteer reports: ", result.error);
+        });
+        
+    } catch (error) {
+        console.error("Error loading volunteer reports: ", error);
         volunteerReportsList.innerHTML = '<p>حدث خطأ أثناء تحميل تقارير المتطوعين</p>';
     }
 }
@@ -1066,13 +1365,13 @@ function contactVolunteer(email, phone1, phone2, name) {
 
 async function deleteVolunteerReportFromPolice(reportId) {
     if (confirm('هل أنت متأكد من حذف هذا التقرير؟')) {
-        const result = await database.deleteVolunteerReport(reportId);
-        
-        if (result.success) {
+        try {
+            await db.collection('volunteerReports').doc(reportId).delete();
             await loadVolunteerReports();
             await updatePoliceBadges();
             showAlert('تم حذف التقرير بنجاح', 'success');
-        } else {
+        } catch (error) {
+            console.error("Error deleting volunteer report from police: ", error);
             showAlert('حدث خطأ أثناء حذف التقرير', 'error');
         }
     }
@@ -1084,50 +1383,64 @@ async function loadVolunteerNotifications() {
     
     notificationsList.innerHTML = '';
     
-    const result = await database.getUserNotifications(appData.currentUser.id);
-    
-    if (result.success) {
-        if (result.notifications.length === 0) {
+    try {
+        const snapshot = await db.collection('notifications')
+            .where('userId', '==', appData.currentUser.id)
+            .where('read', '==', false)
+            .orderBy('createdAt', 'desc')
+            .get();
+        
+        if (snapshot.empty) {
             notificationsList.innerHTML = '<p>لا توجد إشعارات</p>';
             return;
         }
         
-        result.notifications.forEach(notification => {
+        snapshot.forEach(doc => {
+            const notification = {
+                id: doc.id,
+                ...doc.data()
+            };
+            
             const notificationItem = document.createElement('div');
             notificationItem.className = 'notification-item unread';
             notificationItem.innerHTML = `
                 <p><strong>${notification.message}</strong></p>
-                <p><small>${new Date(notification.createdAt?.toDate()).toLocaleString('ar-EG')}</small></p>
-                <button class="mark-read" onclick="markVolunteerNotificationAsRead('${notification.id}')">تمت المشاهدة</button>
+                <p><small>${new Date(notification.createdAt.toDate()).toLocaleString('ar-EG')}</small></p>
+                <button class="mark-read" onclick="markVolunteerNotificationAsRead('${doc.id}')">تمت المشاهدة</button>
             `;
             notificationsList.appendChild(notificationItem);
         });
-    } else {
-        console.error("Error loading volunteer notifications: ", result.error);
+        
+    } catch (error) {
+        console.error("Error loading volunteer notifications: ", error);
         notificationsList.innerHTML = '<p>حدث خطأ أثناء تحميل الإشعارات</p>';
     }
 }
 
 async function markVolunteerNotificationAsRead(notificationId) {
-    const result = await database.markNotificationAsRead(notificationId);
-    
-    if (result.success) {
+    try {
+        await db.collection('notifications').doc(notificationId).update({
+            read: true
+        });
         await loadVolunteerNotifications();
         await updateVolunteerBadges();
-    } else {
-        console.error("Error marking volunteer notification as read: ", result.error);
+    } catch (error) {
+        console.error("Error marking volunteer notification as read: ", error);
     }
 }
 
 async function updateVolunteerBadges() {
     try {
         // شارة الإشعارات
-        const notificationsResult = await database.getUserNotifications(appData.currentUser.id);
-        const notificationsBadge = document.getElementById('volunteer-notifications-badge');
+        const notificationsSnapshot = await db.collection('notifications')
+            .where('userId', '==', appData.currentUser.id)
+            .where('read', '==', false)
+            .get();
         
+        const notificationsBadge = document.getElementById('volunteer-notifications-badge');
         if (notificationsBadge) {
-            if (notificationsResult.success && notificationsResult.notifications.length > 0) {
-                notificationsBadge.textContent = notificationsResult.notifications.length;
+            if (!notificationsSnapshot.empty) {
+                notificationsBadge.textContent = notificationsSnapshot.size;
                 notificationsBadge.style.display = 'inline-block';
             } else {
                 notificationsBadge.style.display = 'none';
@@ -1135,12 +1448,14 @@ async function updateVolunteerBadges() {
         }
         
         // شارة التقارير
-        const reportsResult = await database.getVolunteerReportsByVolunteer(appData.currentUser.id);
-        const reportsBadge = document.getElementById('my-volunteer-reports-badge');
+        const reportsSnapshot = await db.collection('volunteerReports')
+            .where('volunteerId', '==', appData.currentUser.id)
+            .get();
         
+        const reportsBadge = document.getElementById('my-volunteer-reports-badge');
         if (reportsBadge) {
-            if (reportsResult.success && reportsResult.volunteerReports.length > 0) {
-                reportsBadge.textContent = reportsResult.volunteerReports.length;
+            if (!reportsSnapshot.empty) {
+                reportsBadge.textContent = reportsSnapshot.size;
                 reportsBadge.style.display = 'inline-block';
             } else {
                 reportsBadge.style.display = 'none';
@@ -1183,32 +1498,6 @@ function showMainPage() {
     document.getElementById('volunteer-dashboard').classList.add('hidden');
     appData.currentUser = null;
     localStorage.removeItem('currentUser');
-}
-
-function showUserSection(section) {
-    document.getElementById('add-report').classList.add('hidden');
-    document.getElementById('my-reports').classList.add('hidden');
-    document.getElementById('user-notifications').classList.add('hidden');
-    document.getElementById('police-reports').classList.add('hidden');
-    document.getElementById(section).classList.remove('hidden');
-}
-
-function showPoliceSection(section) {
-    document.getElementById('new-reports').classList.add('hidden');
-    document.getElementById('in-progress-reports').classList.add('hidden');
-    document.getElementById('resolved-reports').classList.add('hidden');
-    document.getElementById('volunteer-reports').classList.add('hidden');
-    document.getElementById('upload-reports').classList.add('hidden');
-    document.getElementById('police-notifications').classList.add('hidden');
-    document.getElementById(section).classList.remove('hidden');
-}
-
-function showVolunteerSection(section) {
-    document.getElementById('all-reports').classList.add('hidden');
-    document.getElementById('select-case').classList.add('hidden');
-    document.getElementById('my-reports').classList.add('hidden');
-    document.getElementById('volunteer-notifications').classList.add('hidden');
-    document.getElementById(section).classList.remove('hidden');
 }
 
 function resetReportForm() {
@@ -1258,11 +1547,11 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // إضافة أزرار الخروج
-    const logoutButtons = document.querySelectorAll('.logout-btn');
-    logoutButtons.forEach(button => {
-        button.addEventListener('click', logoutUser);
-    });
+    // تحميل المستخدم من localStorage إذا كان موجوداً
+    const savedUser = localStorage.getItem('currentUser');
+    if (savedUser) {
+        appData.currentUser = JSON.parse(savedUser);
+    }
 });
 
 // جعل جميع الدوال متاحة globally
@@ -1295,3 +1584,8 @@ window.cancelVolunteerEdit = cancelVolunteerEdit;
 window.contactVolunteer = contactVolunteer;
 window.deleteVolunteerReportFromPolice = deleteVolunteerReportFromPolice;
 window.markVolunteerNotificationAsRead = markVolunteerNotificationAsRead;
+window.registerPolice = registerPolice;
+window.loginPolice = loginPolice;
+window.registerVolunteer = registerVolunteer;
+window.loginVolunteer = loginVolunteer;
+window.submitVolunteerReport = addVolunteerReport; // إضافة اسم بديل للدالة

@@ -7,31 +7,7 @@ const firebaseConfig = {
     messagingSenderId: "960039466245",
     appId: "1:960039466245:web:185365d1eefe93e6edb36c"
 };
-// التحقق من اتصال Firebase
-async function checkFirebaseConnection() {
-    try {
-        console.log('🔍 التحقق من اتصال Firebase...');
-        
-        // محاولة قراءة بسيطة من Firestore
-        const testRef = db.collection('test').doc('connection');
-        await testRef.set({ 
-            timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-            test: true 
-        });
-        
-        console.log('✅ اتصال Firebase يعمل بشكل صحيح');
-        return true;
-    } catch (error) {
-        console.error('❌ فشل الاتصال بـ Firebase:', error);
-        showAlert('مشكلة في الاتصال بقاعدة البيانات', 'error');
-        return false;
-    }
-}
 
-// استدعاء التحقق عند تحميل الصفحة
-document.addEventListener('DOMContentLoaded', function() {
-    checkFirebaseConnection();
-});
 // Initialize Firebase
 const app = firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
@@ -77,7 +53,31 @@ firebase.auth().onAuthStateChanged((user) => {
         showMainPage();
     }
 });
+// التحقق من اتصال Firebase
+async function checkFirebaseConnection() {
+    try {
+        console.log('🔍 التحقق من اتصال Firebase...');
+        
+        // محاولة قراءة بسيطة من Firestore
+        const testRef = db.collection('test').doc('connection');
+        await testRef.set({ 
+            timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+            test: true 
+        });
+        
+        console.log('✅ اتصال Firebase يعمل بشكل صحيح');
+        return true;
+    } catch (error) {
+        console.error('❌ فشل الاتصال بـ Firebase:', error);
+        showAlert('مشكلة في الاتصال بقاعدة البيانات', 'error');
+        return false;
+    }
+}
 
+// استدعاء التحقق عند تحميل الصفحة
+document.addEventListener('DOMContentLoaded', function() {
+    checkFirebaseConnection();
+});
 // ==================== دوال المساعدة ====================
 function showAlert(message, type = 'info') {
     const alertDiv = document.createElement('div');

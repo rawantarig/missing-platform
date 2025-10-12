@@ -158,116 +158,9 @@ async function checkPhoneExists(phone) {
     }
 }
 
-// ==================== دوال التحقق من نظام المصادقة ====================
-async function checkAuthEmailExists(email) {
-    try {
-        const methods = await firebase.auth().fetchSignInMethodsForEmail(email);
-        return methods.length > 0;
-    } catch (error) {
-        console.error('Error checking auth email:', error);
-        return false;
-    }
-}
-
-// دالة لمعالجة الحسابات الميتة (موجودة في المصادقة ولكن ليس في Firestore)
-async function handleOrphanedAccount(email, password) {
-    try {
-        // محاولة تسجيل الدخول أولاً
-        await firebase.auth().signInWithEmailAndPassword(email, password);
-        
-        // إذا نجح التسجيل، فهذا يعني الحساب موجود في المصادقة ولكن ليس في Firestore
-        const user = firebase.auth().currentUser;
-        
-        if (user) {
-            // إنشاء السجل المفقود في Firestore
-            const userData = {
-                email: email.toLowerCase().trim(),
-                name: "مستخدم - يحتاج تحديث",
-                role: 'user',
-                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                lastLogin: firebase.firestore.FieldValue.serverTimestamp()
-            };
-            
-            await db.collection('users').doc(user.uid).set(userData, { merge: true });
-            showAlert("تم استعادة الحساب بنجاح! يرجى تحديث بياناتك", "success");
-            return true;
-        }
-    } catch (error) {
-        console.error('Error handling orphaned account:', error);
-    }
-    return false;
-}
-
-// دالة لاستعادة الحسابات الميتة من واجهة المستخدم
-async function recoverOrphanedAccount() {
-    const email = prompt("الرجاء إدخال البريد الإلكتروني للحساب المفقود:");
-    if (!email) return;
-    
-    const password = prompt("الرجاء إدخال كلمة المرور:");
-    if (!password) return;
-    
-    try {
-        // محاولة تسجيل الدخول
-        await firebase.auth().signInWithEmailAndPassword(email, password);
-        const user = firebase.auth().currentUser;
-        
-        if (user) {
-            // التحقق مما إذا كان الحساب موجوداً في Firestore
-            const userDoc = await db.collection('users').doc(user.uid).get();
-            
-            if (!userDoc.exists) {
-                // الحساب ميت - إنشاء السجل المفقود
-                const userType = prompt("ما هو نوع الحساب؟ (user/police/volunteer):");
-                const name = prompt("الرجاء إدخال الاسم:");
-                
-                const userData = {
-                    email: email.toLowerCase().trim(),
-                    name: name || "مستخدم - يحتاج تحديث",
-                    role: userType || 'user',
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                    lastLogin: firebase.firestore.FieldValue.serverTimestamp()
-                };
-                
-                await db.collection('users').doc(user.uid).set(userData);
-                showAlert("تم استعادة الحساب بنجاح! ✅", "success");
-                
-                // إعادة تحميل الصفحة
-                setTimeout(() => {
-                    location.reload();
-                }, 2000);
-            } else {
-                showAlert("الحساب موجود بالفعل في النظام", "info");
-            }
-        }
-    } catch (error) {
-        console.error("Error recovering account:", error);
-        showAlert("فشل في استعادة الحساب. تأكد من البريد الإلكتروني وكلمة المرور", "error");
-    }
-}
-
-// إضافة الزر إلى الواجهة (للتطوير)
-function addRecoveryButton() {
-    const recoveryBtn = document.createElement('button');
-    recoveryBtn.textContent = 'استعادة حساب مفقود';
-    recoveryBtn.style.cssText = `
-        position: fixed;
-        bottom: 20px;
-        left: 20px;
-        padding: 10px;
-        background: #ff9800;
-        color: white;
-        border: none;
-        border-radius: 5px;
-        cursor: pointer;
-        z-index: 1000;
-    `;
-    recoveryBtn.onclick = recoverOrphanedAccount;
-    document.body.appendChild(recoveryBtn);
-}
-
 // ==================== دوال التسجيل والدخول ====================
 
-// دوال المستخدمين - محسنة مع التحقق من نظام المصادقة
+// دوال المستخدمين - مبسطة
 async function registerUser() {
     const fullName = document.getElementById('user-name').value;
     const email = document.getElementById('user-email').value;
@@ -282,44 +175,32 @@ async function registerUser() {
             const registerBtn = document.querySelector('#user-register-btn');
             if (registerBtn) {
                 registerBtn.disabled = true;
-                registerBtn.textContent = 'جاري التحقق...';
+                registerBtn.textContent = 'جاري إنشاء الحساب...';
             }
 
-            // 1. التحقق من وجود البريد في نظام المصادقة أولاً
-            console.log('🔍 التحقق من وجود البريد في نظام المصادقة...');
-            const authEmailExists = await checkAuthEmailExists(email);
-            if (authEmailExists) {
-                // محاولة معالجة الحساب الميت
-                const recovered = await handleOrphanedAccount(email, password);
-                if (!recovered) {
-                    showAlert("هذا البريد الإلكتروني مسجل مسبقاً في نظام المصادقة. يرجى استخدام بريد إلكتروني آخر أو تسجيل الدخول", "error");
-                    return;
-                }
-            }
-
-            // 2. التحقق من وجود البريد الإلكتروني في قاعدة البيانات
+            // التحقق من وجود البريد الإلكتروني في قاعدة البيانات فقط
             console.log('🔍 التحقق من وجود البريد في قاعدة البيانات...');
             const emailExists = await checkEmailExists(email);
             if (emailExists) {
-                showAlert("هذا البريد الإلكتروني مسجل بالفعل في قاعدة البيانات", "error");
+                showAlert("هذا البريد الإلكتروني مسجل بالفعل", "error");
                 return;
             }
 
-            // 3. التحقق من وجود رقم الهاتف في قاعدة البيانات
+            // التحقق من وجود رقم الهاتف في قاعدة البيانات
             console.log('🔍 التحقق من وجود رقم الهاتف في قاعدة البيانات...');
             const phoneExists = await checkPhoneExists(phone);
             if (phoneExists) {
-                showAlert("رقم الهاتف مسجل مسبقاً في قاعدة البيانات", "error");
+                showAlert("رقم الهاتف مسجل مسبقاً", "error");
                 return;
             }
 
-            // 4. إنشاء المستخدم في Authentication
+            // إنشاء المستخدم في Authentication
             console.log('📝 إنشاء مستخدم في Authentication...');
             const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
             const user = userCredential.user;
             console.log('✅ تم إنشاء المستخدم في Authentication:', user.uid);
 
-            // 5. حفظ بيانات المستخدم في Firestore
+            // حفظ بيانات المستخدم في Firestore
             console.log('💾 حفظ بيانات المستخدم في Firestore...');
             const userData = {
                 fullName: fullName.trim(),
@@ -333,7 +214,7 @@ async function registerUser() {
             await db.collection('users').doc(user.uid).set(userData);
             console.log('✅ تم حفظ بيانات المستخدم في Firestore');
 
-            // 6. تحديث بيانات المستخدم في التطبيق
+            // تحديث بيانات المستخدم في التطبيق
             appData.currentUser = {
                 id: user.uid,
                 ...userData
@@ -355,7 +236,7 @@ async function registerUser() {
             let errorMessage = "حدث خطأ أثناء إنشاء الحساب";
             
             if (error.code === 'auth/email-already-in-use') {
-                errorMessage = "هذا البريد الإلكتروني مسجل مسبقاً في نظام المصادقة. يرجى استخدام بريد إلكتروني آخر";
+                errorMessage = "هذا البريد الإلكتروني مسجل بالفعل في النظام";
             } else if (error.code === 'auth/weak-password') {
                 errorMessage = "كلمة المرور ضعيفة - يجب أن تكون 6 أحرف على الأقل";
             } else if (error.code === 'auth/invalid-email') {
@@ -412,7 +293,7 @@ async function loginUser() {
     }
 }
 
-// دوال الشرطة - محسنة مع التحقق من نظام المصادقة
+// دوال الشرطة - مبسطة
 async function registerPolice() {
     const name = document.getElementById('police-name').value;
     const email = document.getElementById('police-email').value;
@@ -425,20 +306,13 @@ async function registerPolice() {
             const registerBtn = document.querySelector('#police-register-btn');
             if (registerBtn) {
                 registerBtn.disabled = true;
-                registerBtn.textContent = 'جاري التحقق...';
+                registerBtn.textContent = 'جاري إنشاء الحساب...';
             }
 
-            // التحقق من وجود البريد في نظام المصادقة أولاً
-            const authEmailExists = await checkAuthEmailExists(email);
-            if (authEmailExists) {
-                showAlert("هذا البريد الإلكتروني مسجل مسبقاً في نظام المصادقة. يرجى استخدام بريد إلكتروني آخر", "error");
-                return;
-            }
-
-            // التحقق من البريد الإلكتروني في قاعدة البيانات
+            // التحقق من البريد الإلكتروني في قاعدة البيانات فقط
             const emailExists = await checkEmailExists(email);
             if (emailExists) {
-                showAlert("هذا البريد الإلكتروني مسجل بالفعل في قاعدة البيانات", "error");
+                showAlert("هذا البريد الإلكتروني مسجل بالفعل", "error");
                 return;
             }
 
@@ -466,7 +340,7 @@ async function registerPolice() {
             let errorMessage = "حدث خطأ أثناء إنشاء الحساب";
             
             if (error.code === 'auth/email-already-in-use') {
-                errorMessage = "هذا البريد الإلكتروني مسجل مسبقاً في نظام المصادقة";
+                errorMessage = "هذا البريد الإلكتروني مسجل بالفعل في النظام";
             } else if (error.code === 'auth/weak-password') {
                 errorMessage = "كلمة المرور ضعيفة، يجب أن تكون 6 أحرف على الأقل";
             }
@@ -516,7 +390,7 @@ async function loginPolice() {
     }
 }
 
-// دوال المتطوعين - محسنة مع التحقق من نظام المصادقة
+// دوال المتطوعين - مبسطة
 async function registerVolunteer() {
     const name = document.getElementById('volunteer-name').value;
     const email = document.getElementById('volunteer-email').value;
@@ -528,20 +402,13 @@ async function registerVolunteer() {
             const registerBtn = document.querySelector('#volunteer-register-btn');
             if (registerBtn) {
                 registerBtn.disabled = true;
-                registerBtn.textContent = 'جاري التحقق...';
+                registerBtn.textContent = 'جاري إنشاء الحساب...';
             }
 
-            // التحقق من وجود البريد في نظام المصادقة أولاً
-            const authEmailExists = await checkAuthEmailExists(email);
-            if (authEmailExists) {
-                showAlert("هذا البريد الإلكتروني مسجل مسبقاً في نظام المصادقة. يرجى استخدام بريد إلكتروني آخر", "error");
-                return;
-            }
-
-            // التحقق من البريد الإلكتروني في قاعدة البيانات
+            // التحقق من البريد الإلكتروني في قاعدة البيانات فقط
             const emailExists = await checkEmailExists(email);
             if (emailExists) {
-                showAlert("هذا البريد الإلكتروني مسجل بالفعل في قاعدة البيانات", "error");
+                showAlert("هذا البريد الإلكتروني مسجل بالفعل", "error");
                 return;
             }
 
@@ -573,7 +440,7 @@ async function registerVolunteer() {
             let errorMessage = "حدث خطأ أثناء إنشاء الحساب";
             
             if (error.code === 'auth/email-already-in-use') {
-                errorMessage = "هذا البريد الإلكتروني مسجل مسبقاً في نظام المصادقة";
+                errorMessage = "هذا البريد الإلكتروني مسجل بالفعل في النظام";
             } else if (error.code === 'auth/weak-password') {
                 errorMessage = "كلمة المرور ضعيفة، يجب أن تكون 6 أحرف على الأقل";
             }
@@ -1060,7 +927,7 @@ async function loadUserNotifications() {
     }
 }
 
-// ==================== تحديث التحقق أثناء الكتابة ====================
+// ==================== التحقق أثناء الكتابة ====================
 function setupRealTimeValidation() {
     // التحقق من البريد الإلكتروني للمستخدمين
     const userEmailInput = document.getElementById('user-email');
@@ -1070,12 +937,9 @@ function setupRealTimeValidation() {
         userEmailInput.addEventListener('blur', async function() {
             const email = this.value.trim();
             if (email) {
-                // التحقق من نظام المصادقة أولاً
-                const authExists = await checkAuthEmailExists(email);
-                const dbExists = await checkEmailExists(email);
-                
-                if (authExists || dbExists) {
-                    showAlert("هذا البريد الإلكتروني مسجل مسبقاً في النظام", "warning");
+                const exists = await checkEmailExists(email);
+                if (exists) {
+                    showAlert("هذا البريد الإلكتروني مسجل مسبقاً", "warning");
                     this.style.borderColor = '#f44336';
                 } else {
                     this.style.borderColor = '#4CAF50';
@@ -1107,12 +971,9 @@ function setupRealTimeValidation() {
         policeEmailInput.addEventListener('blur', async function() {
             const email = this.value.trim();
             if (email) {
-                // التحقق من نظام المصادقة أولاً
-                const authExists = await checkAuthEmailExists(email);
-                const dbExists = await checkEmailExists(email);
-                
-                if (authExists || dbExists) {
-                    showAlert("هذا البريد الإلكتروني مسجل مسبقاً في النظام", "warning");
+                const exists = await checkEmailExists(email);
+                if (exists) {
+                    showAlert("هذا البريد الإلكتروني مسجل مسبقاً", "warning");
                     this.style.borderColor = '#f44336';
                 } else {
                     this.style.borderColor = '#4CAF50';
@@ -1143,12 +1004,9 @@ function setupRealTimeValidation() {
         volunteerEmailInput.addEventListener('blur', async function() {
             const email = this.value.trim();
             if (email) {
-                // التحقق من نظام المصادقة أولاً
-                const authExists = await checkAuthEmailExists(email);
-                const dbExists = await checkEmailExists(email);
-                
-                if (authExists || dbExists) {
-                    showAlert("هذا البريد الإلكتروني مسجل مسبقاً في النظام", "warning");
+                const exists = await checkEmailExists(email);
+                if (exists) {
+                    showAlert("هذا البريد الإلكتروني مسجل مسبقاً", "warning");
                     this.style.borderColor = '#f44336';
                 } else {
                     this.style.borderColor = '#4CAF50';
@@ -1178,9 +1036,8 @@ window.viewReportDetails = viewReportDetails;
 window.assignToVolunteer = assignToVolunteer;
 window.updateReportStatus = updateReportStatus;
 window.addReport = addReport;
-window.recoverOrphanedAccount = recoverOrphanedAccount;
 
-// ==================== تحديث التهيئة ====================
+// ==================== تهيئة التطبيق ====================
 document.addEventListener('DOMContentLoaded', function() {
     // معالجة عرض الصور المرفوعة
     const photoInput = document.getElementById('missing-photo');
@@ -1212,11 +1069,6 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // التحقق من اتصال Firebase
     checkFirebaseConnection();
-    
-    // إضافة زر استعادة الحسابات الميتة (للتطوير)
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-        addRecoveryButton();
-    }
 });
 
 // ==================== دوال إضافية للوحات التحكم ====================
@@ -1294,4 +1146,4 @@ async function loadMyVolunteerReports() {
 
 async function loadVolunteerNotifications() {
     // تحميل إشعارات المتطوع
-}
+                }

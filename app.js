@@ -394,46 +394,70 @@ async function loginUser() {
     const password = document.getElementById('user-login-password').value;
     
     try {
-        const userCredential = await firebase.auth().signInWithEmailAndPassword(email, password);
+        async function handleSignup(event) {
+    event.preventDefault();
+    
+    const name = document.getElementById('signupName').value;
+    const email = document.getElementById('signupEmail').value;
+    const phone = document.getElementById('signupPhone').value;
+    const password = document.getElementById('signupPassword').value;
+
+    // Input validation
+    if (!name || !email || !phone || !password) {
+        showAlert("يرجى ملء جميع الحقول", "error");
+        return;
+    }
+
+    if (password.length < 6) {
+        showAlert("كلمة المرور يجب أن تكون 6 أحرف على الأقل", "error");
+        return;
+    }
+
+    try {
+        console.log("🔄 محاولة إنشاء حساب:", email);
+        
+        // 1. Create user in Firebase Authentication
+        const userCredential = await auth.createUserWithEmailAndPassword(email, password);
         const user = userCredential.user;
         
-        const userDoc = await db.collection('users').doc(user.uid).get();
+        console.log("✅ تم إنشاء المستخدم في Auth:", user.uid);
+
+        // 2. Save user data in Firestore
+        await db.collection('users').doc(user.uid).set({
+            name: name,
+            email: email,
+            phone: phone,
+            role: 'user',
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+
+        console.log("✅ تم حفظ بيانات المستخدم في Firestore");
+        showAlert("تم إنشاء الحساب بنجاح!", "success");
         
-        if (userDoc.exists) {
-            const userData = userDoc.data();
-            
-            appData.currentUser = {
-                id: user.uid,
-                ...userData
-            };
-            
-            localStorage.setItem('currentUser', JSON.stringify(appData.currentUser));
-            
-            if (userData.role === 'user') {
-                await showUserDashboard();
-            } else {
-                showAlert("ليس لديك صلاحية الدخول كمستخدم", "error");
-                logoutUser();
-            }
-        } else {
-            showAlert("بيانات المستخدم غير موجودة", "error");
-        }
-        
+        // Auto login after successful registration
+        setTimeout(() => {
+            showUserDashboard();
+        }, 1500);
+
     } catch (error) {
-        console.error("Error logging in: ", error);
-        let errorMessage = "البريد الإلكتروني أو كلمة المرور غير صحيحة";
+        console.error("❌ خطأ في إنشاء الحساب:", error.code, error.message);
         
-        if (error.code === 'auth/user-not-found') {
-            errorMessage = "المستخدم غير موجود";
-        } else if (error.code === 'auth/wrong-password') {
-            errorMessage = "كلمة المرور غير صحيحة";
+        // SPECIFIC ERROR HANDLING - FIXED!
+        if (error.code === 'auth/email-already-in-use') {
+            showAlert('هذا البريد الإلكتروني مسجل بالفعل', 'error');
+        } else if (error.code === 'auth/weak-password') {
+            showAlert('كلمة المرور ضعيفة - يجب أن تكون 6 أحرف على الأقل', 'error');
         } else if (error.code === 'auth/invalid-email') {
-            errorMessage = "البريد الإلكتروني غير صالح";
+            showAlert('بريد إلكتروني غير صحيح', 'error');
+        } else if (error.code === 'auth/operation-not-allowed') {
+            showAlert('عملية إنشاء الحساب غير مسموحة', 'error');
+        } else if (error.code === 'auth/network-request-failed') {
+            showAlert('مشكلة في الاتصال بالإنترنت', 'error');
+        } else {
+            showAlert('حدث خطأ غير متوقع: ' + error.message, 'error');
         }
-        
-        showAlert(errorMessage, "error");
     }
-}
+        }
 
 // ==================== إضافة دالة الخروج ====================
 async function logoutUser() {

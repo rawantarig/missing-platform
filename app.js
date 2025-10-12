@@ -7,7 +7,31 @@ const firebaseConfig = {
     messagingSenderId: "960039466245",
     appId: "1:960039466245:web:185365d1eefe93e6edb36c"
 };
+// التحقق من اتصال Firebase
+async function checkFirebaseConnection() {
+    try {
+        console.log('🔍 التحقق من اتصال Firebase...');
+        
+        // محاولة قراءة بسيطة من Firestore
+        const testRef = db.collection('test').doc('connection');
+        await testRef.set({ 
+            timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+            test: true 
+        });
+        
+        console.log('✅ اتصال Firebase يعمل بشكل صحيح');
+        return true;
+    } catch (error) {
+        console.error('❌ فشل الاتصال بـ Firebase:', error);
+        showAlert('مشكلة في الاتصال بقاعدة البيانات', 'error');
+        return false;
+    }
+}
 
+// استدعاء التحقق عند تحميل الصفحة
+document.addEventListener('DOMContentLoaded', function() {
+    checkFirebaseConnection();
+});
 // Initialize Firebase
 const app = firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
@@ -280,37 +304,91 @@ async function registerUser() {
     
     if (name && email && phone && password) {
         try {
+            console.log('🚀 بدء عملية إنشاء حساب...');
+            
+            // تعطيل الزر لمنع النقر المتعدد
+            const registerBtn = document.querySelector('#user-register-btn');
+            if (registerBtn) {
+                registerBtn.disabled = true;
+                registerBtn.textContent = 'جاري إنشاء الحساب...';
+            }
+
+            // 1. إنشاء المستخدم في Authentication
+            console.log('📝 إنشاء مستخدم في Authentication...');
             const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
             const user = userCredential.user;
-            
-            await db.collection('users').doc(user.uid).set({
+            console.log('✅ تم إنشاء المستخدم في Authentication:', user.uid);
+
+            // 2. حفظ بيانات المستخدم في Firestore
+            console.log('💾 حفظ بيانات المستخدم في Firestore...');
+            const userData = {
                 name: name,
                 email: email,
                 phone: phone,
                 role: 'user',
                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
-            });
+            };
+
+            await db.collection('users').doc(user.uid).set(userData);
+            console.log('✅ تم حفظ بيانات المستخدم في Firestore');
+
+            // 3. إعداد بيانات المستخدم في التطبيق
+            appData.currentUser = {
+                id: user.uid,
+                ...userData
+            };
             
-            showAlert("تم إنشاء الحساب بنجاح!", "success");
-            showLogin('user');
+            localStorage.setItem('currentUser', JSON.stringify(appData.currentUser));
+
+            showAlert("تم إنشاء الحساب بنجاح! ✅", "success");
+            console.log('🎉 تم إنشاء الحساب بنجاح');
+
+            // الانتقال إلى صفحة الدخول بعد نجاح التسجيل
+            setTimeout(() => {
+                showLogin('user');
+            }, 1500);
             
         } catch (error) {
-            console.error("Error registering user: ", error);
-            let errorMessage = "حدث خطأ أثناء إنشاء الحساب";
+            console.error('❌ خطأ في إنشاء الحساب:', error);
             
+            let errorMessage = "حدث خطأ أثناء إنشاء الحساب";
+            let errorDetails = "";
+            
+            // تحليل نوع الخطأ
             if (error.code === 'auth/email-already-in-use') {
                 errorMessage = "هذا البريد الإلكتروني مسجل بالفعل";
+                errorDetails = "البريد الإلكتروني rawantarig141@gmail.com مستخدم already";
             } else if (error.code === 'auth/weak-password') {
-                errorMessage = "كلمة المرور ضعيفة، يجب أن تكون 6 أحرف على الأقل";
+                errorMessage = "كلمة المرور ضعيفة";
+                errorDetails = "كلمة المرور يجب أن تكون 6 أحرف على الأقل";
+            } else if (error.code === 'auth/invalid-email') {
+                errorMessage = "البريد الإلكتروني غير صالح";
+                errorDetails = "صيغة البريد الإلكتروني غير صحيحة";
+            } else if (error.code === 'auth/network-request-failed') {
+                errorMessage = "مشكلة في الاتصال بالإنترنت";
+                errorDetails = "تأكد من اتصالك بالإنترنت";
+            } else if (error.code === 'auth/operation-not-allowed') {
+                errorMessage = "عملية التسجيل غير مفعلة";
+                errorDetails = "يجب تفعيل التسجيل بالبريد الإلكتروني في Firebase Console";
+            } else {
+                errorDetails = error.message || "خطأ غير معروف";
             }
             
-            showAlert(errorMessage, "error");
+            console.error('تفاصيل الخطأ:', errorDetails);
+            showAlert(`${errorMessage} - ${errorDetails}`, "error");
+            
+        } finally {
+            // إعادة تمكين الزر
+            const registerBtn = document.querySelector('#user-register-btn');
+            if (registerBtn) {
+                registerBtn.disabled = false;
+                registerBtn.textContent = 'إنشاء الحساب';
+            }
         }
     } else {
         showAlert("يرجى ملء جميع الحقول", "warning");
     }
-}
-
+                }
 async function loginUser() {
     const email = document.getElementById('user-login-email').value;
     const password = document.getElementById('user-login-password').value;

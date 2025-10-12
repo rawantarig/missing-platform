@@ -10,7 +10,6 @@ const firebaseConfig = {
 
 // Initialize Firebase
 const app = firebase.initializeApp(firebaseConfig);
-const auth = firebase.auth();
 const db = firebase.firestore();
 
 // بيانات التطبيق
@@ -20,72 +19,6 @@ const appData = {
     editingReportId: null,
     allReports: []
 };
-
-// ==================== مستمع حالة المصادقة ====================
-firebase.auth().onAuthStateChanged(async (user) => {
-    if (user) {
-        console.log('🔑 مستخدم مسجل الدخول:', user.uid);
-        
-        try {
-            // جلب بيانات المستخدم من Firestore
-            const userDoc = await db.collection('users').doc(user.uid).get();
-            
-            if (userDoc.exists) {
-                const userData = userDoc.data();
-                appData.currentUser = {
-                    id: user.uid,
-                    ...userData
-                };
-                
-                localStorage.setItem('currentUser', JSON.stringify(appData.currentUser));
-                console.log('✅ تم تحميل بيانات المستخدم:', userData.name || userData.fullName);
-                
-                // توجيه المستخدم حسب الصلاحية
-                if (userData.role === 'user') {
-                    showUserDashboard();
-                } else if (userData.role === 'police') {
-                    showPoliceDashboard();
-                } else if (userData.role === 'volunteer') {
-                    showVolunteerDashboard();
-                }
-            } else {
-                console.error('❌ بيانات المستخدم غير موجودة في Firestore');
-                showAlert("بيانات المستخدم غير مكتملة", "error");
-                await logoutUser();
-            }
-        } catch (error) {
-            console.error("Error getting user data:", error);
-            showAlert("خطأ في تحميل بيانات المستخدم", "error");
-        }
-    } else {
-        // المستخدم غير مسجل دخول
-        console.log('🚫 لا يوجد مستخدم مسجل الدخول');
-        appData.currentUser = null;
-        localStorage.removeItem('currentUser');
-        showMainPage();
-    }
-});
-
-// التحقق من اتصال Firebase
-async function checkFirebaseConnection() {
-    try {
-        console.log('🔍 التحقق من اتصال Firebase...');
-        
-        // محاولة قراءة بسيطة من Firestore
-        const testRef = db.collection('test').doc('connection');
-        await testRef.set({ 
-            timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-            test: true 
-        });
-        
-        console.log('✅ اتصال Firebase يعمل بشكل صحيح');
-        return true;
-    } catch (error) {
-        console.error('❌ فشل الاتصال بـ Firebase:', error);
-        showAlert('مشكلة في الاتصال بقاعدة البيانات', 'error');
-        return false;
-    }
-}
 
 // ==================== دوال المساعدة ====================
 function showAlert(message, type = 'info') {
@@ -160,7 +93,7 @@ async function checkPhoneExists(phone) {
 
 // ==================== دوال التسجيل والدخول ====================
 
-// دوال المستخدمين - مبسطة
+// دوال المستخدمين - بدون مصادقة
 async function registerUser() {
     const fullName = document.getElementById('user-name').value;
     const email = document.getElementById('user-email').value;
@@ -178,7 +111,7 @@ async function registerUser() {
                 registerBtn.textContent = 'جاري إنشاء الحساب...';
             }
 
-            // التحقق من وجود البريد الإلكتروني في قاعدة البيانات فقط
+            // التحقق من وجود البريد الإلكتروني في قاعدة البيانات
             console.log('🔍 التحقق من وجود البريد في قاعدة البيانات...');
             const emailExists = await checkEmailExists(email);
             if (emailExists) {
@@ -194,32 +127,27 @@ async function registerUser() {
                 return;
             }
 
-            // إنشاء المستخدم في Authentication
-            console.log('📝 إنشاء مستخدم في Authentication...');
-            const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
-            const user = userCredential.user;
-            console.log('✅ تم إنشاء المستخدم في Authentication:', user.uid);
-
+            // إنشاء معرف فريد للمستخدم
+            const userId = generateUserId();
+            
             // حفظ بيانات المستخدم في Firestore
             console.log('💾 حفظ بيانات المستخدم في Firestore...');
             const userData = {
+                id: userId,
                 fullName: fullName.trim(),
                 email: email.toLowerCase().trim(),
                 phone: phone.trim(),
+                password: password, // في الواقع يجب تشفير كلمة المرور
                 role: 'user',
                 createdAt: firebase.firestore.FieldValue.serverTimestamp(),
                 lastLogin: firebase.firestore.FieldValue.serverTimestamp()
             };
 
-            await db.collection('users').doc(user.uid).set(userData);
+            await db.collection('users').doc(userId).set(userData);
             console.log('✅ تم حفظ بيانات المستخدم في Firestore');
 
             // تحديث بيانات المستخدم في التطبيق
-            appData.currentUser = {
-                id: user.uid,
-                ...userData
-            };
-            
+            appData.currentUser = userData;
             localStorage.setItem('currentUser', JSON.stringify(appData.currentUser));
 
             showAlert("تم إنشاء الحساب بنجاح! ✅", "success");
@@ -232,23 +160,7 @@ async function registerUser() {
             
         } catch (error) {
             console.error('❌ خطأ في إنشاء الحساب:', error);
-            
-            let errorMessage = "حدث خطأ أثناء إنشاء الحساب";
-            
-            if (error.code === 'auth/email-already-in-use') {
-                errorMessage = "هذا البريد الإلكتروني مسجل بالفعل في النظام";
-            } else if (error.code === 'auth/weak-password') {
-                errorMessage = "كلمة المرور ضعيفة - يجب أن تكون 6 أحرف على الأقل";
-            } else if (error.code === 'auth/invalid-email') {
-                errorMessage = "البريد الإلكتروني غير صالح";
-            } else if (error.code === 'auth/network-request-failed') {
-                errorMessage = "مشكلة في الاتصال بالإنترنت";
-            } else {
-                errorMessage = "حدث خطأ غير متوقع: " + error.message;
-            }
-            
-            showAlert(errorMessage, "error");
-            
+            showAlert("حدث خطأ أثناء إنشاء الحساب: " + error.message, "error");
         } finally {
             // إعادة تمكين الزر
             const registerBtn = document.querySelector('#user-register-btn');
@@ -267,33 +179,40 @@ async function loginUser() {
     const password = document.getElementById('user-login-password').value;
     
     try {
-        const userCredential = await firebase.auth().signInWithEmailAndPassword(email, password);
-        const user = userCredential.user;
+        // البحث عن المستخدم في قاعدة البيانات
+        const userQuery = await db.collection('users')
+            .where('email', '==', email.toLowerCase().trim())
+            .where('password', '==', password)
+            .where('role', '==', 'user')
+            .get();
+        
+        if (userQuery.empty) {
+            showAlert("البريد الإلكتروني أو كلمة المرور غير صحيحة", "error");
+            return;
+        }
+        
+        const userDoc = userQuery.docs[0];
+        const userData = userDoc.data();
         
         // تحديث آخر دخول
-        await db.collection('users').doc(user.uid).update({
+        await db.collection('users').doc(userDoc.id).update({
             lastLogin: firebase.firestore.FieldValue.serverTimestamp()
         });
         
+        // تحديث بيانات المستخدم في التطبيق
+        appData.currentUser = userData;
+        localStorage.setItem('currentUser', JSON.stringify(appData.currentUser));
+        
         showAlert("تم تسجيل الدخول بنجاح!", "success");
+        showUserDashboard();
         
     } catch (error) {
         console.error("Error logging in user: ", error);
-        let errorMessage = "البريد الإلكتروني أو كلمة المرور غير صحيحة";
-        
-        if (error.code === 'auth/user-not-found') {
-            errorMessage = "المستخدم غير موجود";
-        } else if (error.code === 'auth/wrong-password') {
-            errorMessage = "كلمة المرور غير صحيحة";
-        } else if (error.code === 'auth/invalid-email') {
-            errorMessage = "البريد الإلكتروني غير صالح";
-        }
-        
-        showAlert(errorMessage, "error");
+        showAlert("حدث خطأ أثناء تسجيل الدخول", "error");
     }
 }
 
-// دوال الشرطة - مبسطة
+// دوال الشرطة - بدون مصادقة
 async function registerPolice() {
     const name = document.getElementById('police-name').value;
     const email = document.getElementById('police-email').value;
@@ -309,20 +228,22 @@ async function registerPolice() {
                 registerBtn.textContent = 'جاري إنشاء الحساب...';
             }
 
-            // التحقق من البريد الإلكتروني في قاعدة البيانات فقط
+            // التحقق من البريد الإلكتروني في قاعدة البيانات
             const emailExists = await checkEmailExists(email);
             if (emailExists) {
                 showAlert("هذا البريد الإلكتروني مسجل بالفعل", "error");
                 return;
             }
 
-            const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
-            const user = userCredential.user;
+            // إنشاء معرف فريد للشرطة
+            const policeId = generateUserId();
             
-            await db.collection('users').doc(user.uid).set({
+            await db.collection('users').doc(policeId).set({
+                id: policeId,
                 name: name.trim(),
                 email: email.toLowerCase().trim(),
                 phone: phone.trim(),
+                password: password,
                 role: 'police',
                 createdAt: firebase.firestore.FieldValue.serverTimestamp(),
                 lastLogin: firebase.firestore.FieldValue.serverTimestamp()
@@ -331,21 +252,22 @@ async function registerPolice() {
             showAlert("تم إنشاء حساب الشرطة بنجاح!", "success");
             
             // تسجيل الدخول تلقائياً
+            appData.currentUser = {
+                id: policeId,
+                name: name.trim(),
+                email: email.toLowerCase().trim(),
+                phone: phone.trim(),
+                role: 'police'
+            };
+            localStorage.setItem('currentUser', JSON.stringify(appData.currentUser));
+            
             setTimeout(() => {
                 showPoliceDashboard();
             }, 1500);
             
         } catch (error) {
             console.error("Error registering police: ", error);
-            let errorMessage = "حدث خطأ أثناء إنشاء الحساب";
-            
-            if (error.code === 'auth/email-already-in-use') {
-                errorMessage = "هذا البريد الإلكتروني مسجل بالفعل في النظام";
-            } else if (error.code === 'auth/weak-password') {
-                errorMessage = "كلمة المرور ضعيفة، يجب أن تكون 6 أحرف على الأقل";
-            }
-            
-            showAlert(errorMessage, "error");
+            showAlert("حدث خطأ أثناء إنشاء الحساب", "error");
         } finally {
             // إعادة تمكين الزر
             const registerBtn = document.querySelector('#police-register-btn');
@@ -364,33 +286,40 @@ async function loginPolice() {
     const password = document.getElementById('police-login-password').value;
     
     try {
-        const userCredential = await firebase.auth().signInWithEmailAndPassword(email, password);
-        const user = userCredential.user;
+        // البحث عن الشرطة في قاعدة البيانات
+        const policeQuery = await db.collection('users')
+            .where('email', '==', email.toLowerCase().trim())
+            .where('password', '==', password)
+            .where('role', '==', 'police')
+            .get();
+        
+        if (policeQuery.empty) {
+            showAlert("البريد الإلكتروني أو كلمة المرور غير صحيحة", "error");
+            return;
+        }
+        
+        const policeDoc = policeQuery.docs[0];
+        const policeData = policeDoc.data();
         
         // تحديث آخر دخول
-        await db.collection('users').doc(user.uid).update({
+        await db.collection('users').doc(policeDoc.id).update({
             lastLogin: firebase.firestore.FieldValue.serverTimestamp()
         });
         
+        // تحديث بيانات الشرطة في التطبيق
+        appData.currentUser = policeData;
+        localStorage.setItem('currentUser', JSON.stringify(appData.currentUser));
+        
         showAlert("تم تسجيل الدخول بنجاح!", "success");
+        showPoliceDashboard();
         
     } catch (error) {
         console.error("Error logging in police: ", error);
-        let errorMessage = "البريد الإلكتروني أو كلمة المرور غير صحيحة";
-        
-        if (error.code === 'auth/user-not-found') {
-            errorMessage = "المستخدم غير موجود";
-        } else if (error.code === 'auth/wrong-password') {
-            errorMessage = "كلمة المرور غير صحيحة";
-        } else if (error.code === 'auth/invalid-email') {
-            errorMessage = "البريد الإلكتروني غير صالح";
-        }
-        
-        showAlert(errorMessage, "error");
+        showAlert("حدث خطأ أثناء تسجيل الدخول", "error");
     }
 }
 
-// دوال المتطوعين - مبسطة
+// دوال المتطوعين - بدون مصادقة
 async function registerVolunteer() {
     const name = document.getElementById('volunteer-name').value;
     const email = document.getElementById('volunteer-email').value;
@@ -405,24 +334,25 @@ async function registerVolunteer() {
                 registerBtn.textContent = 'جاري إنشاء الحساب...';
             }
 
-            // التحقق من البريد الإلكتروني في قاعدة البيانات فقط
+            // التحقق من البريد الإلكتروني في قاعدة البيانات
             const emailExists = await checkEmailExists(email);
             if (emailExists) {
                 showAlert("هذا البريد الإلكتروني مسجل بالفعل", "error");
                 return;
             }
 
-            const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
-            const user = userCredential.user;
+            // إنشاء معرف فريد للمتطوع
+            const volunteerId = generateUserId();
             
-            await db.collection('users').doc(user.uid).set({
+            await db.collection('users').doc(volunteerId).set({
+                id: volunteerId,
                 name: name.trim(),
                 email: email.toLowerCase().trim(),
                 password: password,
                 active: true,
                 registrationDate: firebase.firestore.FieldValue.serverTimestamp(),
                 reportHandled: 0,
-                volunteerId: user.uid,
+                volunteerId: volunteerId,
                 role: 'volunteer',
                 createdAt: firebase.firestore.FieldValue.serverTimestamp(),
                 lastLogin: firebase.firestore.FieldValue.serverTimestamp()
@@ -431,21 +361,23 @@ async function registerVolunteer() {
             showAlert("تم إنشاء حساب المتطوع بنجاح!", "success");
             
             // تسجيل الدخول تلقائياً
+            appData.currentUser = {
+                id: volunteerId,
+                name: name.trim(),
+                email: email.toLowerCase().trim(),
+                role: 'volunteer',
+                active: true,
+                reportHandled: 0
+            };
+            localStorage.setItem('currentUser', JSON.stringify(appData.currentUser));
+            
             setTimeout(() => {
                 showVolunteerDashboard();
             }, 1500);
             
         } catch (error) {
             console.error("Error registering volunteer: ", error);
-            let errorMessage = "حدث خطأ أثناء إنشاء الحساب";
-            
-            if (error.code === 'auth/email-already-in-use') {
-                errorMessage = "هذا البريد الإلكتروني مسجل بالفعل في النظام";
-            } else if (error.code === 'auth/weak-password') {
-                errorMessage = "كلمة المرور ضعيفة، يجب أن تكون 6 أحرف على الأقل";
-            }
-            
-            showAlert(errorMessage, "error");
+            showAlert("حدث خطأ أثناء إنشاء الحساب", "error");
         } finally {
             // إعادة تمكين الزر
             const registerBtn = document.querySelector('#volunteer-register-btn');
@@ -464,43 +396,45 @@ async function loginVolunteer() {
     const password = document.getElementById('volunteer-login-password').value;
     
     try {
-        const userCredential = await firebase.auth().signInWithEmailAndPassword(email, password);
-        const user = userCredential.user;
+        // البحث عن المتطوع في قاعدة البيانات
+        const volunteerQuery = await db.collection('users')
+            .where('email', '==', email.toLowerCase().trim())
+            .where('password', '==', password)
+            .where('role', '==', 'volunteer')
+            .get();
+        
+        if (volunteerQuery.empty) {
+            showAlert("البريد الإلكتروني أو كلمة المرور غير صحيحة", "error");
+            return;
+        }
+        
+        const volunteerDoc = volunteerQuery.docs[0];
+        const volunteerData = volunteerDoc.data();
         
         // تحديث آخر دخول
-        await db.collection('users').doc(user.uid).update({
+        await db.collection('users').doc(volunteerDoc.id).update({
             lastLogin: firebase.firestore.FieldValue.serverTimestamp()
         });
         
+        // تحديث بيانات المتطوع في التطبيق
+        appData.currentUser = volunteerData;
+        localStorage.setItem('currentUser', JSON.stringify(appData.currentUser));
+        
         showAlert("تم تسجيل الدخول بنجاح!", "success");
+        showVolunteerDashboard();
         
     } catch (error) {
         console.error("Error logging in volunteer: ", error);
-        let errorMessage = "البريد الإلكتروني أو كلمة المرور غير صحيحة";
-        
-        if (error.code === 'auth/user-not-found') {
-            errorMessage = "المستخدم غير موجود";
-        } else if (error.code === 'auth/wrong-password') {
-            errorMessage = "كلمة المرور غير صحيحة";
-        } else if (error.code === 'auth/invalid-email') {
-            errorMessage = "البريد الإلكتروني غير صالح";
-        }
-        
-        showAlert(errorMessage, "error");
+        showAlert("حدث خطأ أثناء تسجيل الدخول", "error");
     }
 }
 
 // ==================== إضافة دالة الخروج ====================
 async function logoutUser() {
-    try {
-        await firebase.auth().signOut();
-        appData.currentUser = null;
-        localStorage.removeItem('currentUser');
-        showMainPage();
-        showAlert("تم تسجيل الخروج بنجاح", "success");
-    } catch (error) {
-        console.error("Error signing out: ", error);
-    }
+    appData.currentUser = null;
+    localStorage.removeItem('currentUser');
+    showMainPage();
+    showAlert("تم تسجيل الخروج بنجاح", "success");
 }
 
 // ==================== دوال لوحة التحكم ====================
@@ -601,7 +535,7 @@ function showUserSection(section) {
     document.getElementById(section).classList.remove('hidden');
 }
 
-// دوال البلاغات للمستخدم - مكيفة مع الهيكل الجديد
+// دوال البلاغات للمستخدم
 async function addUserReport() {
     const name = document.getElementById('missing-name').value;
     const age = document.getElementById('missing-age').value;
@@ -623,7 +557,9 @@ async function addUserReport() {
                 image = await readFileAsDataURL(photoInput.files[0]);
             }
             
+            const reportId = generateReportId();
             const newReport = {
+                reportId: reportId,
                 userId: appData.currentUser.id,
                 name: name,
                 age: parseInt(age),
@@ -642,11 +578,7 @@ async function addUserReport() {
             };
             
             // حفظ البلاغ في Firestore
-            const reportRef = await db.collection('reports').add(newReport);
-            const reportId = reportRef.id;
-            
-            // تحديث البلاغ بإضافة report id
-            await reportRef.update({ reportId: reportId });
+            await db.collection('reports').doc(reportId).set(newReport);
             
             // إرسال إشعار للمستخدم
             await db.collection('notifications').add({
@@ -768,7 +700,9 @@ async function addReport() {
     
     if (reportContent && relatedReportId) {
         try {
+            const reportDocId = generateReportId();
             const newReportDoc = {
+                reportId: reportDocId,
                 reportContent: reportContent,
                 relatedReportId: relatedReportId,
                 reportDate: firebase.firestore.FieldValue.serverTimestamp(),
@@ -809,25 +743,6 @@ async function viewReportDetails(reportId) {
         if (reportDoc.exists) {
             const report = reportDoc.data();
             
-            // عرض التفاصيل في modal أو نافذة منبثقة
-            const detailsHTML = `
-                <div class="report-details-modal">
-                    <h3>تفاصيل البلاغ: ${report.name}</h3>
-                    <p><strong>العمر:</strong> ${report.age}</p>
-                    <p><strong>الجنس:</strong> ${report.gender || 'غير محدد'}</p>
-                    <p><strong>الطول:</strong> ${report.height || 'غير محدد'}</p>
-                    <p><strong>آخر مكالمة:</strong> ${report.last_call || 'غير محدد'}</p>
-                    <p><strong>آخر مكان:</strong> ${report.last_seen_location}</p>
-                    <p><strong>رقم الهاتف 1:</strong> ${report.phone1}</p>
-                    <p><strong>رقم الهاتف 2:</strong> ${report.phone2 || 'غير متوفر'}</p>
-                    <p><strong>رقم الهاتف 3:</strong> ${report.phone3 || 'غير متوفر'}</p>
-                    <p><strong>الوصف:</strong> ${report.description || 'لا يوجد وصف'}</p>
-                    <p><strong>الحالة:</strong> ${report.status}</p>
-                    ${report.image ? `<img src="${report.image}" alt="صورة المفقود" style="max-width: 300px; margin-top: 10px;">` : ''}
-                </div>
-            `;
-            
-            // يمكن استبدال هذا بعرض modal حقيقي
             alert(`تفاصيل البلاغ:\nالاسم: ${report.name}\nالعمر: ${report.age}\nالجنس: ${report.gender}\nآخر مكان: ${report.last_seen_location}`);
         }
     } catch (error) {
@@ -838,7 +753,6 @@ async function viewReportDetails(reportId) {
 
 async function assignToVolunteer(reportId) {
     try {
-        // في التطبيق الحقيقي، يمكن اختيار متطوع من قائمة
         const volunteersSnapshot = await db.collection('users')
             .where('role', '==', 'volunteer')
             .where('active', '==', true)
@@ -927,93 +841,13 @@ async function loadUserNotifications() {
     }
 }
 
-// ==================== التحقق أثناء الكتابة ====================
-function setupRealTimeValidation() {
-    // التحقق من البريد الإلكتروني للمستخدمين
-    const userEmailInput = document.getElementById('user-email');
-    const userPhoneInput = document.getElementById('user-phone');
-    
-    if (userEmailInput) {
-        userEmailInput.addEventListener('blur', async function() {
-            const email = this.value.trim();
-            if (email) {
-                const exists = await checkEmailExists(email);
-                if (exists) {
-                    showAlert("هذا البريد الإلكتروني مسجل مسبقاً", "warning");
-                    this.style.borderColor = '#f44336';
-                } else {
-                    this.style.borderColor = '#4CAF50';
-                }
-            }
-        });
-    }
-    
-    if (userPhoneInput) {
-        userPhoneInput.addEventListener('blur', async function() {
-            const phone = this.value.trim();
-            if (phone) {
-                const exists = await checkPhoneExists(phone);
-                if (exists) {
-                    showAlert("رقم الهاتف مسجل مسبقاً", "warning");
-                    this.style.borderColor = '#f44336';
-                } else {
-                    this.style.borderColor = '#4CAF50';
-                }
-            }
-        });
-    }
-    
-    // التحقق من البريد الإلكتروني للشرطة
-    const policeEmailInput = document.getElementById('police-email');
-    const policePhoneInput = document.getElementById('police-phone');
-    
-    if (policeEmailInput) {
-        policeEmailInput.addEventListener('blur', async function() {
-            const email = this.value.trim();
-            if (email) {
-                const exists = await checkEmailExists(email);
-                if (exists) {
-                    showAlert("هذا البريد الإلكتروني مسجل مسبقاً", "warning");
-                    this.style.borderColor = '#f44336';
-                } else {
-                    this.style.borderColor = '#4CAF50';
-                }
-            }
-        });
-    }
-    
-    if (policePhoneInput) {
-        policePhoneInput.addEventListener('blur', async function() {
-            const phone = this.value.trim();
-            if (phone) {
-                const exists = await checkPhoneExists(phone);
-                if (exists) {
-                    showAlert("رقم الهاتف مسجل مسبقاً", "warning");
-                    this.style.borderColor = '#f44336';
-                } else {
-                    this.style.borderColor = '#4CAF50';
-                }
-            }
-        });
-    }
-    
-    // التحقق من البريد الإلكتروني للمتطوعين
-    const volunteerEmailInput = document.getElementById('volunteer-email');
-    
-    if (volunteerEmailInput) {
-        volunteerEmailInput.addEventListener('blur', async function() {
-            const email = this.value.trim();
-            if (email) {
-                const exists = await checkEmailExists(email);
-                if (exists) {
-                    showAlert("هذا البريد الإلكتروني مسجل مسبقاً", "warning");
-                    this.style.borderColor = '#f44336';
-                } else {
-                    this.style.borderColor = '#4CAF50';
-                }
-            }
-        });
-    }
+// ==================== دوال توليد المعرفات ====================
+function generateUserId() {
+    return 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+}
+
+function generateReportId() {
+    return 'report_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
 }
 
 // ==================== جعل الدوال متاحة عالمياً ====================
@@ -1062,33 +896,30 @@ document.addEventListener('DOMContentLoaded', function() {
     const savedUser = localStorage.getItem('currentUser');
     if (savedUser) {
         appData.currentUser = JSON.parse(savedUser);
+        
+        // توجيه المستخدم حسب الصلاحية
+        if (appData.currentUser.role === 'user') {
+            showUserDashboard();
+        } else if (appData.currentUser.role === 'police') {
+            showPoliceDashboard();
+        } else if (appData.currentUser.role === 'volunteer') {
+            showVolunteerDashboard();
+        }
     }
-    
-    // إعداد التحقق أثناء الكتابة
-    setupRealTimeValidation();
-    
-    // التحقق من اتصال Firebase
-    checkFirebaseConnection();
 });
 
 // ==================== دوال إضافية للوحات التحكم ====================
 function showPoliceSection(section) {
-    // إخفاء جميع الأقسام أولاً
     document.querySelectorAll('#police-dashboard .dashboard-section').forEach(sec => {
         sec.classList.add('hidden');
     });
-    
-    // إظهار القسم المطلوب
     document.getElementById(section).classList.remove('hidden');
 }
 
 function showVolunteerSection(section) {
-    // إخفاء جميع الأقسام أولاً
     document.querySelectorAll('#volunteer-dashboard .dashboard-section').forEach(sec => {
         sec.classList.add('hidden');
     });
-    
-    // إظهار القسم المطلوب
     document.getElementById(section).classList.remove('hidden');
 }
 

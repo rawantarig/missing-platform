@@ -18,12 +18,12 @@ import {
 
 // تكوين Firebase - ضع إعداداتك هنا
 const firebaseConfig = {
-    apiKey: "your-api-key",
-    authDomain: "your-project.firebaseapp.com",
-    projectId: "your-project-id",
-    storageBucket: "your-project.appspot.com",
-    messagingSenderId: "123456789",
-    appId: "your-app-id"
+    apiKey: "AIzaSyCd5KilOByaq7s5r3sGo6sl555q9QKSpxE",
+    authDomain: "missing-platform-db.firebaseapp.com",
+    projectId: "missing-platform-db",
+    storageBucket: "missing-platform-db.appspot.com",
+    messagingSenderId: "960039466245",
+    appId: "1:960039466245:web:185365d1eefe93e6edb36c"
 };
 
 // تهيئة Firebase

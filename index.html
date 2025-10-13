@@ -1035,41 +1035,65 @@
             });
         }
 
-        function registerUser() {
-            const name = document.getElementById('user-name').value;
-            const email = document.getElementById('user-email').value;
-            const phone = document.getElementById('user-phone').value;
-            const password = document.getElementById('user-password').value;
+        async function registerUser() {
+    const name = document.getElementById('user-name').value;
+    const email = document.getElementById('user-email').value;
+    const phone = document.getElementById('user-phone').value;
+    const password = document.getElementById('user-password').value;
+    
+    if (name && email && phone && password) {
+        try {
+            // استخدام Firebase Authentication
+            const userCredential = await auth.createUserWithEmailAndPassword(email, password);
+            const user = userCredential.user;
             
-            if (name && email && phone && password) {
-                const newUser = {
-                    id: appData.users.length + 1,
-                    name: name,
-                    email: email,
-                    phone: phone,
-                    password: password
-                };
-                
-                appData.users.push(newUser);
-                alert("تم إنشاء الحساب بنجاح!");
-                showLogin('user');
-            } else {
-                alert("يرجى ملء جميع الحقول");
-            }
+            // استخدام Firestore من خلال DatabaseService
+            await DatabaseService.user.createUser({
+                email: email,
+                fullName: name,
+                phone: phone,
+                password: password // في التطبيق الحقيقي لا تخزني كلمة المرور
+            });
+            
+            alert("✅ تم إنشاء الحساب بنجاح في Firebase!");
+            showLogin('user');
+            
+        } catch (error) {
+            console.error("Error:", error);
+            alert("❌ حدث خطأ: " + error.message);
+        }
+    } else {
+        alert("يرجى ملء جميع الحقول");
+    }
         }
 
-        function loginUser() {
-            const email = document.getElementById('user-login-email').value;
-            const password = document.getElementById('user-login-password').value;
-            
-            const user = appData.users.find(u => u.email === email && u.password === password);
-            
-            if (user) {
-                appData.currentUser = user;
-                showUserDashboard();
-            } else {
-                alert("البريد الإلكتروني أو كلمة المرور غير صحيحة");
-            }
+        async function loginUser() {
+    const email = document.getElementById('user-login-email').value;
+    const password = document.getElementById('user-login-password').value;
+    
+    try {
+        // استخدام Firebase Authentication
+        const userCredential = await auth.signInWithEmailAndPassword(email, password);
+        const user = userCredential.user;
+        
+        // جلب البيانات الإضافية من Firestore
+        const userData = await DatabaseService.user.getUserByEmail(email);
+        
+        if (userData) {
+            appData.currentUser = {
+                id: user.uid,
+                email: user.email,
+                name: userData.full_name,
+                phone: userData.phone
+            };
+            showUserDashboard();
+            alert("✅ تم تسجيل الدخول بنجاح!");
+        }
+        
+    } catch (error) {
+        console.error("Error:", error);
+        alert("❌ البريد الإلكتروني أو كلمة المرور غير صحيحة");
+    }
         }
 
         function showUserDashboard() {
@@ -1125,32 +1149,116 @@
         }
 
         // ==================== دوال إضافة البلاغ مع الصور ====================
-        function addUserReport() {
-            const missingName = document.getElementById('missing-name').value;
-            const missingAge = document.getElementById('missing-age').value;
-            const missingType = document.getElementById('missing-type').value;
-            const lastCall = document.getElementById('last-call').value;
-            const lastLocation = document.getElementById('last-location').value;
-            const missingHeight = document.getElementById('missing-height').value;
-            const missingDescription = document.getElementById('missing-description').value;
-            const reporterPhone = document.getElementById('reporter-phone').value;
-            const additionalContact = document.getElementById('additional-contact').value;
-            const userPhone2 = document.getElementById('user-phone-2').value;
-            const photoInput = document.getElementById('missing-photo');
+        async function addUserReport() {
+    const missingName = document.getElementById('missing-name').value;
+    const missingAge = document.getElementById('missing-age').value;
+    const missingType = document.getElementById('missing-type').value;
+    const lastCall = document.getElementById('last-call').value;
+    const lastLocation = document.getElementById('last-location').value;
+    const missingHeight = document.getElementById('missing-height').value;
+    const missingDescription = document.getElementById('missing-description').value;
+    const reporterPhone = document.getElementById('reporter-phone').value;
+    const additionalContact = document.getElementById('additional-contact').value;
+    const userPhone2 = document.getElementById('user-phone-2').value;
+    const photoInput = document.getElementById('missing-photo');
+    
+    if (missingName && missingAge && lastLocation && reporterPhone) {
+        try {
+            let photoData = null;
             
-            if (missingName && missingAge && lastLocation && reporterPhone) {
-                let photoData = null;
+            // معالجة الصورة إذا وجدت
+            if (photoInput.files[0]) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    photoData = e.target.result;
+                    completeReportSubmission(photoData);
+                };
+                reader.readAsDataURL(photoInput.files[0]);
+            } else {
+                completeReportSubmission(null);
+            }
+            
+            async function completeReportSubmission(photo) {
+                const reportData = {
+                    name: missingName,
+                    age: missingAge,
+                    phone1: reporterPhone,
+                    phone2: additionalContact || "",
+                    phone3: userPhone2 || "",
+                    lastLocation: lastLocation,
+                    lastCall: lastCall || "",
+                    description: missingDescription,
+                    gender: missingType,
+                    height: missingHeight,
+                    userId: appData.currentUser.id,
+                    reporterName: appData.currentUser.name,
+                    reporterPhone: reporterPhone,
+                    imageUrl: photo // حفظ الصورة ك base64
+                };
                 
-                if (photoInput.files[0]) {
-                    const reader = new FileReader();
-                    reader.onload = function(e) {
-                        photoData = e.target.result;
-                        completeReportSubmission(photoData);
-                    };
-                    reader.readAsDataURL(photoInput.files[0]);
-                } else {
-                    completeReportSubmission(null);
-                }
+                // استخدام Firebase Firestore
+                const reportId = await DatabaseService.report.createReport(reportData);
+                
+                // إنشاء العلاقة في الجدول الوسيط
+                await DatabaseService.reportsRelation.createReportRelation({
+                    reportId: reportId,
+                    userId: appData.currentUser.id,
+                    content: `بلاغ جديد عن مفقود: ${missingName} في ${lastLocation}`
+                });
+                
+                // إضافة البلاغ للبيانات المحلية أيضاً (للتطبيق)
+                const newReport = {
+                    id: appData.reports.length + 1,
+                    userId: appData.currentUser.email,
+                    reporterName: appData.currentUser.name,
+                    reporterPhone: reporterPhone,
+                    additionalContact: additionalContact,
+                    userPhone2: userPhone2,
+                    missingName: missingName,
+                    missingAge: missingAge,
+                    missingType: missingType,
+                    lastCall: lastCall,
+                    lastLocation: lastLocation,
+                    missingHeight: missingHeight,
+                    missingDescription: missingDescription,
+                    status: "جديد",
+                    date: new Date().toLocaleDateString('ar-EG'),
+                    photo: photo
+                };
+                
+                appData.reports.push(newReport);
+                
+                // إرسال إشعار للشرطة
+                sendPoliceNotification(`بلاغ جديد: ${missingName} - ${lastLocation}`);
+                
+                // إرسال إشعار للمستخدم
+                sendUserNotification(`تم إضافة بلاغك بنجاح عن ${missingName}`);
+                
+                // عرض رسالة النجاح
+                document.getElementById('report-success').classList.remove('hidden');
+                document.getElementById('add-report-form').reset();
+                document.getElementById('photo-preview').classList.add('hidden');
+                document.getElementById('reporter-phone').value = appData.currentUser.phone;
+                
+                setTimeout(() => {
+                    document.getElementById('report-success').classList.add('hidden');
+                }, 5000);
+                
+                // تحديث الواجهة
+                loadUserReports();
+                updateUserBadges();
+                
+                alert("✅ تم إضافة البلاغ بنجاح في قاعدة البيانات Firebase!");
+            }
+            
+        } catch (error) {
+            console.error("Error adding report:", error);
+            alert("❌ حدث خطأ في إضافة البلاغ: " + error.message);
+        }
+    } else {
+        alert("يرجى ملء الحقول المطلوبة (الاسم، العمر، آخر مكان، رقم الهاتف)");
+    }
+        }
                 
                 function completeReportSubmission(photo) {
                     const newReport = {

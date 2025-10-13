@@ -4,6 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>منصة إنقاذ المفقودين</title>
+    
+    <!-- مكتبات Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
+    
     <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js"></script>
     <script type="text/javascript">
         (function(){
@@ -821,6 +827,27 @@
         <button class="btn back-btn" onclick="showMainPage()">تسجيل الخروج</button>
     </div>
 <script src="firebase-db.js"></script>
+    <!-- تكوين Firebase -->
+<script>
+    // تكوين Firebase (يجب أن يكون متطابق مع firebase-db.js)
+    const firebaseConfig = {
+        apiKey: "AIzaSyCd5KilOByaq7s5r3sGo6sl555q9QKSpxE",
+        authDomain: "missing-platform-db.firebaseapp.com",
+        projectId: "missing-platform-db",
+        storageBucket: "missing-platform-db.appspot.com",
+        messagingSenderId: "960039466245",
+        appId: "1:960039466245:web:185365d1eefe93e6edb36c"
+    };
+    
+    // تهيئة Firebase
+    firebase.initializeApp(firebaseConfig);
+    
+    // جلب المرجع للخدمات
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+    
+    console.log("✅ Firebase loaded successfully!");
+</script>
     <script>
         // بيانات التطبيق
         const appData = {

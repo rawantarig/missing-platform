@@ -820,7 +820,7 @@
 
         <button class="btn back-btn" onclick="showMainPage()">تسجيل الخروج</button>
     </div>
-
+<script src="firebase-db.js"></script>
     <script>
         // بيانات التطبيق
         const appData = {
@@ -2166,6 +2166,141 @@
                 alert("يرجى اختيار بلاغ وإدخال محتوى التقرير");
             }
         }
+        <!-- الكود الرئيسي قابل للتعديييييييل -->
+    
+        // الكود الرئيسي للتطبيق
+        class ReportApp {
+            constructor() {
+                this.currentUser = null;
+                this.init();
+            }
+
+            init() {
+                this.setupEventListeners();
+                this.checkAuth();
+            }
+
+            setupEventListeners() {
+                // حدث إرسال البلاغ
+                document.getElementById('reportForm').addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    this.submitReport();
+                });
+            }
+
+            async checkAuth() {
+                // هنا كود المصادقة - افترضنا أن المستخدم مسجل الدخول
+                this.currentUser = { id: 'user123', email: 'user@example.com' };
+                this.loadUserReports();
+            }
+
+            async submitReport() {
+                const reportData = {
+                    name: document.getElementById('name').value,
+                    age: parseInt(document.getElementById('age').value),
+                    phone1: document.getElementById('phone1').value,
+                    phone2: document.getElementById('phone2').value,
+                    lastLocation: document.getElementById('lastLocation').value,
+                    description: document.getElementById('description').value,
+                    gender: "ذكر", // يمكنك إضافة select للجنس
+                    height: 170, // يمكنك إضافة input للطول
+                    userId: this.currentUser.id
+                };
+
+                try {
+                    const reportId = await DatabaseService.report.createReport(reportData);
+                    
+                    // إنشاء العلاقة في الجدول الوسيط
+                    await DatabaseService.reportsRelation.createReportRelation({
+                        reportId: reportId,
+                        userId: this.currentUser.id,
+                        content: `بلاغ جديد عن مفقود: ${reportData.name}`
+                    });
+
+                    alert('تم إرسال البلاغ بنجاح!');
+                    document.getElementById('reportForm').reset();
+                    this.loadUserReports();
+                } catch (error) {
+                    alert('حدث خطأ في إرسال البلاغ: ' + error.message);
+                }
+            }
+
+            async loadUserReports() {
+                try {
+                    const reports = await DatabaseService.report.getUserReports(this.currentUser.id);
+                    this.displayReports(reports, 'reportsContainer');
+                } catch (error) {
+                    console.error('Error loading reports:', error);
+                }
+            }
+
+            displayReports(reports, containerId) {
+                const container = document.getElementById(containerId);
+                container.innerHTML = '';
+
+                if (reports.length === 0) {
+                    container.innerHTML = '<p>لا توجد بلاغات</p>';
+                    return;
+                }
+
+                reports.forEach(report => {
+                    const reportElement = document.createElement('div');
+                    reportElement.className = 'report-item';
+                    reportElement.style.border = '1px solid #ddd';
+                    reportElement.style.padding = '15px';
+                    reportElement.style.margin = '10px 0';
+                    reportElement.style.borderRadius = '5px';
+
+                    reportElement.innerHTML = `
+                        <h3>${report.name}</h3>
+                        <p><strong>العمر:</strong> ${report.Age}</p>
+                        <p><strong>آخر مكان:</strong> ${report.last_location}</p>
+                        <p><strong>الحالة:</strong> ${report.status}</p>
+                        <p><strong>تاريخ الإنشاء:</strong> ${new Date(report.createdAt?.toDate()).toLocaleString('ar-SA')}</p>
+                        <button class="btn" onclick="app.updateReportStatus('${report.id}', 'تم الحل')">تم العثور عليه</button>
+                    `;
+
+                    container.appendChild(reportElement);
+                });
+            }
+
+            async updateReportStatus(reportId, newStatus) {
+                try {
+                    await DatabaseService.report.updateReportStatus(reportId, newStatus);
+                    alert('تم تحديث حالة البلاغ');
+                    this.loadUserReports();
+                } catch (error) {
+                    alert('حدث خطأ في تحديث الحالة: ' + error.message);
+                }
+            }
+        }
+
+        // دوال إضافية للمسؤولين
+        async function loadAllReports() {
+            try {
+                const reports = await DatabaseService.report.getAllReports();
+                const app = new ReportApp();
+                app.displayReports(reports, 'adminReportsContainer');
+            } catch (error) {
+                console.error('Error loading all reports:', error);
+            }
+        }
+
+        async function loadVolunteers() {
+            try {
+                const volunteers = await DatabaseService.volunteer.getActiveVolunteers();
+                console.log('المتطوعون النشطون:', volunteers);
+                return volunteers;
+            } catch (error) {
+                console.error('Error loading volunteers:', error);
+            }
+        }
+
+        // تهيئة التطبيق
+        const app = new ReportApp();
+
+        // جعل الكائن app متاحًا globally للاستدعاء من الأزرار
+        window.app = app;
     </script>
 </body>
 </html>

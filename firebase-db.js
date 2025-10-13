@@ -9,14 +9,15 @@ import {
     getDocs, 
     getDoc, 
     updateDoc, 
-    deleteDoc, 
     query, 
     where, 
     orderBy,
     onSnapshot 
 } from 'https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore.js';
 
-// تكوين Firebase - ضع إعداداتك هنا
+// ========================
+// تكوين Firebase
+// ========================
 const firebaseConfig = {
     apiKey: "AIzaSyCd5KilOByaq7s5r3sGo6sl555q9QKSpxE",
     authDomain: "missing-platform-db.firebaseapp.com",
@@ -26,11 +27,12 @@ const firebaseConfig = {
     appId: "1:960039466245:web:185365d1eefe93e6edb36c"
 };
 
-// تهيئة Firebase
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-// دوال جدول User
+// ========================
+// خدمات جدول User
+// ========================
 const userService = {
     async createUser(userData) {
         try {
@@ -64,7 +66,9 @@ const userService = {
         try {
             const q = query(collection(db, "User"), where("email", "==", email));
             const querySnapshot = await getDocs(q);
-            return !querySnapshot.empty ? { id: querySnapshot.docs[0].id, ...querySnapshot.docs[0].data() } : null;
+            return !querySnapshot.empty 
+                ? { id: querySnapshot.docs[0].id, ...querySnapshot.docs[0].data() } 
+                : null;
         } catch (error) {
             console.error("Error getting user by email:", error);
             throw error;
@@ -72,7 +76,9 @@ const userService = {
     }
 };
 
-// دوال جدول Volunteer
+// ========================
+// خدمات جدول Volunteer
+// ========================
 const volunteerService = {
     async createVolunteer(volunteerData) {
         try {
@@ -106,6 +112,7 @@ const volunteerService = {
     async updateVolunteerReports(volunteerId) {
         try {
             const volunteer = await this.getVolunteerById(volunteerId);
+            if (!volunteer) throw new Error("Volunteer not found");
             const volunteerRef = doc(db, "Volunteer", volunteerId);
             await updateDoc(volunteerRef, {
                 report_handled: volunteer.report_handled + 1,
@@ -129,7 +136,9 @@ const volunteerService = {
     }
 };
 
-// دوال جدول Police
+// ========================
+// خدمات جدول Police
+// ========================
 const policeService = {
     async getAllPolice() {
         try {
@@ -153,7 +162,9 @@ const policeService = {
     }
 };
 
-// دوال جدول Report
+// ========================
+// خدمات جدول Report
+// ========================
 const reportService = {
     async createReport(reportData) {
         try {
@@ -168,10 +179,10 @@ const reportService = {
                 height: reportData.height,
                 imageurl: reportData.imageUrl || "",
                 last_call: reportData.lastCall || null,
-                last_location: reportData.lastLocation,
+                last_location: reportData.lastLocation || null,
                 name: reportData.name,
                 status: "قيد المتابعة",
-                updateAt: new Date(),
+                updatedAt: new Date(),
                 user_id: reportData.userId
             });
             return docRef.id;
@@ -188,8 +199,8 @@ const reportService = {
                 where("user_id", "==", userId),
                 orderBy("createdAt", "desc")
             );
-            const querySnapshot = await getDocs(q);
-            return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            const snapshot = await getDocs(q);
+            return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         } catch (error) {
             console.error("Error getting user reports:", error);
             throw error;
@@ -199,8 +210,8 @@ const reportService = {
     async getAllReports() {
         try {
             const q = query(collection(db, "Report"), orderBy("createdAt", "desc"));
-            const querySnapshot = await getDocs(q);
-            return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            const snapshot = await getDocs(q);
+            return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         } catch (error) {
             console.error("Error getting all reports:", error);
             throw error;
@@ -212,7 +223,7 @@ const reportService = {
             const reportRef = doc(db, "Report", reportId);
             await updateDoc(reportRef, {
                 status: newStatus,
-                updateAt: new Date()
+                updatedAt: new Date()
             });
         } catch (error) {
             console.error("Error updating report status:", error);
@@ -231,35 +242,32 @@ const reportService = {
         }
     },
 
-    // الاستماع للتحديثات الفورية على بلاغات مستخدم
     listenToUserReports(userId, callback) {
         const q = query(
             collection(db, "Report"), 
             where("user_id", "==", userId),
             orderBy("createdAt", "desc")
         );
-        
-        return onSnapshot(q, (querySnapshot) => {
-            const reports = [];
-            querySnapshot.forEach((doc) => {
-                reports.push({ id: doc.id, ...doc.data() });
-            });
+        return onSnapshot(q, snapshot => {
+            const reports = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             callback(reports);
         });
     }
 };
 
-// دوال جدول Reports (الوسيط)
+// ========================
+// خدمات جدول Reports (الوسيط)
+// ========================
 const reportsRelationService = {
-    async createReportRelation(relationData) {
+    async createReportRelation(data) {
         try {
             const docRef = await addDoc(collection(db, "Reports"), {
-                related_police_id: relationData.policeId || "",
-                related_user_id: relationData.userId,
-                related_volunteer_id: relationData.volunteerId || "",
-                report_content: relationData.content,
+                related_police_id: data.policeId || "",
+                related_user_id: data.userId,
+                related_volunteer_id: data.volunteerId || "",
+                report_content: data.content,
                 report_date: new Date(),
-                report_id: relationData.reportId,
+                report_id: data.reportId,
                 status: "جديد"
             });
             return docRef.id;
@@ -276,8 +284,8 @@ const reportsRelationService = {
                 where("related_volunteer_id", "==", volunteerId),
                 orderBy("report_date", "desc")
             );
-            const querySnapshot = await getDocs(q);
-            return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            const snapshot = await getDocs(q);
+            return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         } catch (error) {
             console.error("Error getting volunteer relations:", error);
             throw error;
@@ -285,8 +293,11 @@ const reportsRelationService = {
     }
 };
 
-// تصدير جميع الخدمات ككائن واحد
+// ========================
+// تصدير جميع الخدمات
+// ========================
 const DatabaseService = {
+    db,
     user: userService,
     volunteer: volunteerService,
     police: policeService,
@@ -294,5 +305,6 @@ const DatabaseService = {
     reportsRelation: reportsRelationService
 };
 
-// تصدير ككائن global للاستخدام في الملفات الأخرى
+// تصدير عالمي لاستخدامه في أي مكان
 window.DatabaseService = DatabaseService;
+export default DatabaseService;
